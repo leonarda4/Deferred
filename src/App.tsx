@@ -37,6 +37,11 @@ type ExitingBlock = {
 
 const PADDING = 60
 const GAP = 40
+const COMPACT_BREAKPOINT = 600
+const MEDIUM_BREAKPOINT = 1200
+const COMPACT_COLS = 4
+const COMPACT_MAX_ROWS = 3
+const COMPACT_SPACING = 20
 
 const predefinedLayouts: ScreenLayout[] = [
   {
@@ -154,6 +159,90 @@ const activityRecords = [
   { user: 'User0017', action: 'trashed a page', time: '20:49' },
   { user: 'User0020', action: 'left', time: '20:50' },
 ]
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+const compactWidthForBlock = (block: GridBlock) => {
+  const minById: Record<GridBlock['id'], number> = {
+    headline: 4,
+    input: 4,
+    users: 4,
+    timer: 2,
+    next: 4,
+    trash: 2,
+    stack: 2,
+  }
+  if (block.id === 'users') {
+    return COMPACT_COLS
+  }
+  const scaled = Math.round((block.w / COLS) * COMPACT_COLS) || 1
+  const min = minById[block.id] ?? 1
+  return clamp(Math.max(min, scaled), 1, COMPACT_COLS)
+}
+
+const buildCompactLayout = (layout: ScreenLayout): ScreenLayout => {
+  const sorted = [...layout.blocks].sort((a, b) => (a.y - b.y) || (a.x - b.x))
+  const blocks: GridBlock[] = []
+  let x = 1
+  let y = 1
+  let rowHeight = 0
+  let rowBlocks: GridBlock[] = []
+  const finalizeRow = () => {
+    if (rowBlocks.length === 1) {
+      const only = rowBlocks[0]
+      if (only.id !== 'trash') {
+        only.x = 1
+        only.w = COMPACT_COLS
+      }
+    }
+  }
+
+  for (const block of sorted) {
+    const w = compactWidthForBlock(block)
+    const baseH =
+      block.id === 'trash'
+        ? 1
+        : clamp(block.h, 1, COMPACT_MAX_ROWS)
+
+    if (x + w - 1 > COMPACT_COLS && rowHeight > 0) {
+      finalizeRow()
+      y += rowHeight
+      x = 1
+      rowHeight = 0
+      rowBlocks = []
+    }
+
+    const nextRowHeight = Math.max(rowHeight, baseH)
+    if (nextRowHeight > rowHeight) {
+      const minHeight = Math.max(1, nextRowHeight - 1)
+      rowBlocks.forEach((rowBlock) => {
+        rowBlock.h = Math.max(rowBlock.h, minHeight)
+      })
+      rowHeight = nextRowHeight
+    }
+
+    const minHeight = Math.max(1, rowHeight - 1)
+    const h = clamp(Math.max(baseH, minHeight), 1, COMPACT_MAX_ROWS)
+
+    const placed: GridBlock = {
+      ...block,
+      x,
+      y,
+      w,
+      h,
+    }
+    blocks.push(placed)
+    rowBlocks.push(placed)
+    x += w
+  }
+
+  finalizeRow()
+
+  return { ...layout, blocks }
+}
+
+const getMaxRows = (blocks: GridBlock[]) =>
+  blocks.reduce((max, block) => Math.max(max, block.y + block.h - 1), 0)
 
 const usePrefersReducedMotion = () => {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
@@ -438,20 +527,32 @@ const Canvas = ({ layout, timerText, onNext }: { layout: ScreenLayout; timerText
     return () => observer.disconnect()
   }, [])
 
+  const compactLayout = useMemo(() => {
+    if (!size.width || size.width >= COMPACT_BREAKPOINT) return layout
+    return buildCompactLayout(layout)
+  }, [layout, size.width])
+
   const rects = useMemo(() => {
     const rectMap = new Map<string, Rect>()
     if (!size.width || !size.height) return rectMap
 
-    const innerWidth = size.width - 2 * PADDING
-    const innerHeight = size.height - 2 * PADDING
-    const columnWidth = (innerWidth - (COLS - 1) * GAP) / COLS
-    const rowHeight = (innerHeight - (ROWS - 1) * GAP) / ROWS
+    const spacing = size.width < MEDIUM_BREAKPOINT ? COMPACT_SPACING : PADDING
+    const gap = size.width < MEDIUM_BREAKPOINT ? COMPACT_SPACING : GAP
+    const columns = size.width < COMPACT_BREAKPOINT ? COMPACT_COLS : COLS
+    const activeLayout = size.width < COMPACT_BREAKPOINT ? compactLayout : layout
 
-    layout.blocks.forEach((block) => {
-      const left = PADDING + (block.x - 1) * (columnWidth + GAP)
-      const top = PADDING + (block.y - 1) * (rowHeight + GAP)
-      const width = block.w * columnWidth + (block.w - 1) * GAP
-      const height = block.h * rowHeight + (block.h - 1) * GAP
+    const innerWidth = size.width - 2 * spacing
+    const columnWidth = (innerWidth - (columns - 1) * gap) / columns
+    const rowHeight =
+      size.width < COMPACT_BREAKPOINT
+        ? clamp(columnWidth * 0.72, 44, 78)
+        : (size.height - 2 * spacing - (ROWS - 1) * gap) / ROWS
+
+    activeLayout.blocks.forEach((block) => {
+      const left = spacing + (block.x - 1) * (columnWidth + gap)
+      const top = spacing + (block.y - 1) * (rowHeight + gap)
+      const width = block.w * columnWidth + (block.w - 1) * gap
+      const height = block.h * rowHeight + (block.h - 1) * gap
 
       rectMap.set(block.id, {
         left: Math.round(left),
@@ -462,11 +563,13 @@ const Canvas = ({ layout, timerText, onNext }: { layout: ScreenLayout; timerText
     })
 
     return rectMap
-  }, [layout.blocks, size.height, size.width])
+  }, [compactLayout, layout, size.height, size.width])
 
   useEffect(() => {
+    const activeLayout = size.width < COMPACT_BREAKPOINT ? compactLayout : layout
+
     if (prefersReducedMotion) {
-      prevLayoutRef.current = layout
+      prevLayoutRef.current = activeLayout
       prevLayoutRectsRef.current = rects
       setExitingBlocks([])
       return
@@ -475,7 +578,7 @@ const Canvas = ({ layout, timerText, onNext }: { layout: ScreenLayout; timerText
     const previousLayout = prevLayoutRef.current
     if (previousLayout) {
       const prevIds = new Set(previousLayout.blocks.map((block) => block.id))
-      const nextIds = new Set(layout.blocks.map((block) => block.id))
+      const nextIds = new Set(activeLayout.blocks.map((block) => block.id))
       const exitingIds = [...prevIds].filter((id) => !nextIds.has(id))
 
       if (exitingIds.length > 0) {
@@ -500,9 +603,9 @@ const Canvas = ({ layout, timerText, onNext }: { layout: ScreenLayout; timerText
       }
     }
 
-    prevLayoutRef.current = layout
+    prevLayoutRef.current = activeLayout
     prevLayoutRectsRef.current = rects
-  }, [layout, onNext, prefersReducedMotion, rects, timerText])
+  }, [compactLayout, layout, onNext, prefersReducedMotion, rects, size.width, timerText])
 
   useFlipAnimation(blockRefs, layout.id, prefersReducedMotion, size, skipFlipRef)
 
@@ -510,9 +613,27 @@ const Canvas = ({ layout, timerText, onNext }: { layout: ScreenLayout; timerText
     setExitingBlocks((blocks) => blocks.filter((block) => block.id !== id))
   }
 
+  const activeLayout = size.width < COMPACT_BREAKPOINT ? compactLayout : layout
+  const compactContentHeight = useMemo(() => {
+    if (!size.width || size.width >= COMPACT_BREAKPOINT) return null
+    const spacing = COMPACT_SPACING
+    const gap = COMPACT_SPACING
+    const columns = COMPACT_COLS
+    const innerWidth = size.width - 2 * spacing
+    const columnWidth = (innerWidth - (columns - 1) * gap) / columns
+    const rowHeight = clamp(columnWidth * 0.72, 44, 78)
+    const rows = getMaxRows(activeLayout.blocks)
+    if (!rows) return null
+    return spacing * 2 + rows * rowHeight + (rows - 1) * gap
+  }, [activeLayout.blocks, size.width])
+
   return (
-    <div className="canvas" ref={canvasRef}>
-      {layout.blocks.map((block) => {
+    <div
+      className="canvas"
+      ref={canvasRef}
+      style={compactContentHeight ? { minHeight: Math.round(compactContentHeight) } : undefined}
+    >
+      {activeLayout.blocks.map((block) => {
         const rect = rects.get(block.id)
         if (!rect) return null
         return (
@@ -737,13 +858,6 @@ function App() {
       }
     >
       <Canvas layout={layout} timerText={timerText} onNext={handleNext} />
-      {reviewMode && (
-        <div className="review-bar">
-          <button type="button" onClick={handlePrev}>Prev</button>
-          <span>Layout {screenIndex + 1} / {activeLayouts.length}</span>
-          <button type="button" onClick={handleNext}>Next</button>
-        </div>
-      )}
     </div>
   )
 }

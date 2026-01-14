@@ -53,30 +53,6 @@
   pointer-events: none;
 }
 
-.review-bar {
-  position: absolute;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid #1c1b16;
-  padding: 6px 12px;
-  font-size: 0.9rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.review-bar button {
-  border: 1px solid #1c1b16;
-  background: #ffffff;
-  padding: 4px 10px;
-  cursor: pointer;
-  font: inherit;
-  text-transform: uppercase;
-}
 
 .block {
   position: absolute;
@@ -344,6 +320,75 @@
   transform: translate(0, 6px) scale(0.98);
 }
 
+@media (max-width: 1200px) {
+  .block-title {
+    font-size: clamp(2.6rem, 7vw, 4.2rem);
+  }
+
+  .block-panel h2,
+  .log-panel h2 {
+    font-size: 1.2rem;
+  }
+
+  .block-panel p,
+  .block-panel span,
+  .panel-list,
+  .log-list,
+  .locked-input,
+  .input-credit,
+  .stack-count,
+  .stack-label {
+    font-size: 0.9rem;
+  }
+
+  .block--button_trash,
+  .block-button {
+    font-size: 1.5rem;
+  }
+
+  .timer-value {
+    font-size: 2rem;
+  }
+
+  .block--badge {
+    font-size: 1rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .block-title {
+    font-size: clamp(2.1rem, 10vw, 3.2rem);
+  }
+
+  .block-panel h2,
+  .log-panel h2 {
+    font-size: 1.05rem;
+  }
+
+  .block-panel p,
+  .block-panel span,
+  .panel-list,
+  .log-list,
+  .locked-input,
+  .input-credit,
+  .stack-count,
+  .stack-label {
+    font-size: 0.85rem;
+  }
+
+  .block--button_trash,
+  .block-button {
+    font-size: 1.3rem;
+  }
+
+  .timer-value {
+    font-size: 1.8rem;
+  }
+
+  .block--badge {
+    font-size: 0.9rem;
+  }
+}
 
 @media (max-width: 900px) {
   .canvas {
