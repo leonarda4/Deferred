@@ -1,93 +1,152 @@
-# React + TypeScript + Vite
+# Deferred
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**Deferred** is an experimental writing and self-reflection interface designed to make thinking feel slow, uncomfortable, and irreversible again.
 
-## Supabase setup
+It is not a productivity tool.  
+It is not a journaling app.  
+It is not meant to be finished.
 
-1) Create a Supabase project.
-2) In Supabase SQL editor, run the migration in `supabase/migrations/0001_init.sql`.
-3) Seed questions with `supabase/seed.sql`.
-4) Add env vars to `.env.local`:
+Deferred intentionally removes comfort features we take for granted—autosave, undo, skipping, safety nets—and replaces them with time, friction, and commitment. The goal is not better answers, but more honest thinking.
+
+---
+
+## Concept
+
+We are surrounded by systems that optimize for speed, reversibility, and convenience:
+- delete buttons
+- undo histories
+- AI suggestions
+- feeds that decide what comes next
+
+Deferred does the opposite.
+
+It creates an environment where:
+- writing cannot be skipped
+- answers cannot be edited after submission
+- time passes even when nothing is typed
+- deleting text is a meaningful action, not a harmless one
+- leaving early is expected—and measured
+
+The core metric is when and where users leave, not how much they complete.
+
+---
+
+## Experience Principles
+
+- **No skipping**  
+  Questions must be answered in sequence. There is no navigation backward.
+
+- **No autosave**  
+  Text only becomes real when the user commits by moving forward.
+
+- **Deletion is destructive**  
+  Trashed text is recorded, timed, and stored as its own artifact.
+
+- **Time is data**  
+  Time spent thinking, pausing, deleting, and abandoning is as important as the final answer.
+
+- **Discomfort escalates**  
+  Questions progress from vague and light to personal and invasive, while topics rotate to avoid predictability.
+
+---
+
+## What Is Measured
+
+Deferred treats hesitation as first-class data.
+
+Per session:
+- total session duration
+- exit point (question where user leaves)
+
+Per question:
+- time spent before submission
+- time spent on trashed versions
+- number of trash actions
+- long pauses without typing
+- final vs trashed text comparison (when applicable)
+
+The system assumes that leaving is success, not failure.
+
+---
+
+## Question System
+
+- Canonical question set (fixed order for all users)
+- Increasing discomfort curve
+- Interleaved themes (identity, control, desire, fear, agency)
+- Paired questions that reappear later in altered form
+- IDs and pair groups designed for longitudinal comparison
+
+The experience is intentionally designed to feel impossible to finish.
+
+---
+
+## Tech Stack (Current)
+
+- **Frontend:** React / Next.js
+- **Backend:** Supabase
+- **Database:** PostgreSQL (RLS enabled)
+- **Auth:** Anonymous / session-based
+- **Storage:** Text + metadata only (no AI processing)
+
+The backend is minimal by design. Most logic lives client-side to preserve immediacy and reduce abstraction.
+
+---
+
+## Repository Structure (High Level)
 
 ```
-VITE_SUPABASE_URL=your_project_url
-VITE_SUPABASE_ANON_KEY=your_anon_key
-VITE_APP_VERSION=dev
+/app            → UI, routing, interaction logic
+/lib            → Supabase client, helpers
+/db             → SQL schemas, indexes, RLS policies
+/data           → Question definitions (canonical sets)
+/docs           → Concept notes and analysis
 ```
 
-5) Install deps and run:
+(Structure may evolve as the project stabilizes.)
 
-```
-npm install
-npm run dev
-```
+---
 
-Currently, two official plugins are available:
+## Why This Exists
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Time is often called our most valuable asset.  
+Deferred argues that attention and thought are more valuable—and more endangered.
 
-## React Compiler
+This project explores what happens when:
+- thinking is not optimized
+- writing is not safe
+- progress is not guaranteed
+- technology refuses to help
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+It is meant as:
+- an interaction design experiment
+- a critical interface
+- a case study for discomfort as a design material
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Status
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+This project is experimental and evolving.  
+Expect breaking changes, unfinished edges, and intentional roughness.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+Deferred is not meant to scale.  
+It is meant to confront.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+---
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## License
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+MIT (subject to change if the project evolves into a research artifact)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+---
+
+## Author
+
+Leonard A.  
+Interaction / Critical Design Project
+
+---
+
+> “This website is meant to waste your time,  
+> but it might return a thought.”
