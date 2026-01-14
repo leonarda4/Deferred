@@ -53,6 +53,31 @@
   pointer-events: none;
 }
 
+.review-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid #1c1b16;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.review-bar button {
+  border: 1px solid #1c1b16;
+  background: #ffffff;
+  padding: 4px 10px;
+  cursor: pointer;
+  font: inherit;
+  text-transform: uppercase;
+}
+
 .block {
   position: absolute;
   box-sizing: border-box;
@@ -65,7 +90,7 @@
   transform-origin: top left;
 }
 
-.block--title {
+.block--headline {
   border: none;
   background: transparent;
   padding: 0;
@@ -81,8 +106,8 @@
   margin: 0;
 }
 
-.block--panel-log,
-.block--panel-quote {
+.block--users_left_panel,
+.block--input_panel {
   align-items: flex-start;
   justify-content: flex-start;
 }
@@ -149,7 +174,7 @@
   width: 100%;
 }
 
-.block--trash {
+.block--button_trash {
   background: #111111;
   border: none;
   color: #fdf8e6;
@@ -160,7 +185,7 @@
   justify-content: center;
 }
 
-.block--button {
+.block--button_next {
   background: var(--accent);
   border: 1px solid #1c1b16;
   padding: 0;
@@ -178,7 +203,7 @@
   cursor: pointer;
 }
 
-.block--timer {
+.block--timer_panel {
   background: #ffffff;
 }
 
@@ -198,7 +223,7 @@
   font-size: 1rem;
 }
 
-.block--stack {
+.block--trashed_pages_stack {
   background: transparent;
   border: none;
   justify-content: center;
@@ -229,7 +254,7 @@
   caret-color: #14110f;
 }
 
-.block--panel-quote {
+.block--input_panel {
   overflow: hidden;
 }
 

@@ -9,22 +9,16 @@ import {
   type ReactNode,
 } from 'react'
 import './App.css'
-
-type GridBlock = {
-  id: string
-  kind: string
-  x: number
-  y: number
-  w: number
-  h: number
-  z?: number
-  content?: string | number
-}
-
-type ScreenLayout = {
-  id: string
-  blocks: GridBlock[]
-}
+import {
+  COLS,
+  ROWS,
+  generateRandomLayout,
+  generateRandomLayoutWithInputAwayFromEdges,
+  generateRandomLayoutWithBias,
+  REQUIRED_BLOCK_COUNT,
+  type GridBlock,
+  type ScreenLayout,
+} from './layout/generateRandomLayout'
 
 type Rect = {
   left: number
@@ -41,106 +35,104 @@ type ExitingBlock = {
   content: ReactNode
 }
 
-const COLS = 12
-const ROWS = 6
 const PADDING = 60
 const GAP = 40
 
-const screens: ScreenLayout[] = [
+const predefinedLayouts: ScreenLayout[] = [
   {
     id: 'layout-01',
     blocks: [
-      { id: 'title', kind: 'title', x: 1, y: 1, w: 7, h: 2, z: 1, content: 'What decisions do you delay the longest?' },
-      { id: 'next', kind: 'button', x: 9, y: 1, w: 4, h: 1, z: 2 },
-      { id: 'log', kind: 'panel-log', x: 8, y: 2, w: 5, h: 3, z: 1, content: '15 users already left, are you next?' },
-      { id: 'quote', kind: 'panel-quote', x: 1, y: 3, w: 7, h: 3, z: 1, content: '"Career stuff."' },
-      { id: 'stack', kind: 'stack', x: 8, y: 5, w: 2, h: 1, z: 2, content: 61 },
-      { id: 'trash', kind: 'trash', x: 8, y: 6, w: 2, h: 1, z: 3 },
-      { id: 'timer', kind: 'timer', x: 10, y: 5, w: 3, h: 2, z: 1 },
+      { id: 'headline', kind: 'headline', x: 1, y: 1, w: 7, h: 2, z: 1, content: 'What decisions do you delay the longest?' },
+      { id: 'next', kind: 'button_next', x: 9, y: 1, w: 4, h: 1, z: 2 },
+      { id: 'users', kind: 'users_left_panel', x: 8, y: 2, w: 5, h: 3, z: 1, content: '15 users already left, are you next?' },
+      { id: 'input', kind: 'input_panel', x: 1, y: 3, w: 7, h: 3, z: 1, content: '"Career stuff."' },
+      { id: 'stack', kind: 'trashed_pages_stack', x: 8, y: 5, w: 2, h: 1, z: 2, content: 61 },
+      { id: 'trash', kind: 'button_trash', x: 8, y: 6, w: 2, h: 1, z: 3 },
+      { id: 'timer', kind: 'timer_panel', x: 10, y: 5, w: 3, h: 2, z: 1 },
     ],
   },
   {
     id: 'layout-02',
     blocks: [
-      { id: 'log', kind: 'panel-log', x: 1, y: 1, w: 6, h: 3, z: 1, content: '15 users already left, are you next?' },
-      { id: 'quote', kind: 'panel-quote', x: 7, y: 1, w: 6, h: 2, z: 1, content: '"Sleep :)"' },
-      { id: 'title', kind: 'title', x: 1, y: 4, w: 7, h: 2, z: 1, content: 'What would you still do if no one could see the result?' },
-      { id: 'timer', kind: 'timer', x: 8, y: 4, w: 5, h: 2, z: 1 },
-      { id: 'stack', kind: 'stack', x: 9, y: 6, w: 2, h: 1, z: 2, content: 43 },
-      { id: 'trash', kind: 'trash', x: 11, y: 6, w: 2, h: 1, z: 3 },
-      { id: 'next', kind: 'button', x: 1, y: 6, w: 6, h: 1, z: 2 },
+      { id: 'users', kind: 'users_left_panel', x: 1, y: 1, w: 6, h: 3, z: 1, content: '15 users already left, are you next?' },
+      { id: 'input', kind: 'input_panel', x: 7, y: 1, w: 6, h: 2, z: 1, content: '"Sleep :)"' },
+      { id: 'headline', kind: 'headline', x: 1, y: 4, w: 7, h: 2, z: 1, content: 'What would you still do if no one could see the result?' },
+      { id: 'timer', kind: 'timer_panel', x: 8, y: 4, w: 5, h: 2, z: 1 },
+      { id: 'stack', kind: 'trashed_pages_stack', x: 9, y: 6, w: 2, h: 1, z: 2, content: 43 },
+      { id: 'trash', kind: 'button_trash', x: 11, y: 6, w: 2, h: 1, z: 3 },
+      { id: 'next', kind: 'button_next', x: 1, y: 6, w: 6, h: 1, z: 2 },
     ],
   },
   {
     id: 'layout-03',
     blocks: [
-      { id: 'log', kind: 'panel-log', x: 1, y: 1, w: 6, h: 3, z: 1, content: '5 users already left, are you next?' },
-      { id: 'quote', kind: 'panel-quote', x: 7, y: 1, w: 6, h: 3, z: 1, content: '"Watching bad reality TV and overanalyzing it."' },
-      { id: 'next', kind: 'button', x: 1, y: 4, w: 6, h: 1, z: 2 },
-      { id: 'stack', kind: 'stack', x: 7, y: 4, w: 2, h: 1, z: 2, content: 11 },
-      { id: 'trash', kind: 'trash', x: 9, y: 4, w: 3, h: 1, z: 3 },
-      { id: 'title', kind: 'title', x: 1, y: 5, w: 7, h: 2, z: 1, content: 'What do you enjoy that you rarely talk about?' },
-      { id: 'timer', kind: 'timer', x: 9, y: 5, w: 4, h: 2, z: 1 },
+      { id: 'users', kind: 'users_left_panel', x: 1, y: 1, w: 6, h: 3, z: 1, content: '5 users already left, are you next?' },
+      { id: 'input', kind: 'input_panel', x: 7, y: 1, w: 6, h: 3, z: 1, content: '"Watching bad reality TV and overanalyzing it."' },
+      { id: 'next', kind: 'button_next', x: 1, y: 4, w: 6, h: 1, z: 2 },
+      { id: 'stack', kind: 'trashed_pages_stack', x: 7, y: 4, w: 2, h: 1, z: 2, content: 11 },
+      { id: 'trash', kind: 'button_trash', x: 9, y: 4, w: 3, h: 1, z: 3 },
+      { id: 'headline', kind: 'headline', x: 1, y: 5, w: 7, h: 2, z: 1, content: 'What do you enjoy that you rarely talk about?' },
+      { id: 'timer', kind: 'timer_panel', x: 9, y: 5, w: 4, h: 2, z: 1 },
     ],
   },
   {
     id: 'layout-04',
     blocks: [
-      { id: 'timer', kind: 'timer', x: 1, y: 1, w: 4, h: 2, z: 1 },
-      { id: 'title', kind: 'title', x: 6, y: 1, w: 7, h: 2, z: 1, content: 'What do you blame on lack of time?' },
-      { id: 'trash', kind: 'trash', x: 1, y: 3, w: 2, h: 1, z: 3 },
-      { id: 'stack', kind: 'stack', x: 5, y: 3, w: 2, h: 1, z: 2, content: 21 },
-      { id: 'next', kind: 'button', x: 7, y: 3, w: 4, h: 1, z: 2 },
-      { id: 'log', kind: 'panel-log', x: 1, y: 4, w: 6, h: 3, z: 1, content: '16 users already left, are you next?' },
-      { id: 'quote', kind: 'panel-quote', x: 7, y: 4, w: 6, h: 3, z: 1, content: '"Calling my parents."' },
+      { id: 'timer', kind: 'timer_panel', x: 1, y: 1, w: 4, h: 2, z: 1 },
+      { id: 'headline', kind: 'headline', x: 6, y: 1, w: 7, h: 2, z: 1, content: 'What do you blame on lack of time?' },
+      { id: 'trash', kind: 'button_trash', x: 1, y: 3, w: 2, h: 1, z: 3 },
+      { id: 'stack', kind: 'trashed_pages_stack', x: 5, y: 3, w: 2, h: 1, z: 2, content: 21 },
+      { id: 'next', kind: 'button_next', x: 7, y: 3, w: 4, h: 1, z: 2 },
+      { id: 'users', kind: 'users_left_panel', x: 1, y: 4, w: 6, h: 3, z: 1, content: '16 users already left, are you next?' },
+      { id: 'input', kind: 'input_panel', x: 7, y: 4, w: 6, h: 3, z: 1, content: '"Calling my parents."' },
     ],
   },
   {
     id: 'layout-05',
     blocks: [
-      { id: 'title', kind: 'title', x: 1, y: 1, w: 7, h: 2, z: 1, content: 'What part of yourself do others misunderstand?' },
-      { id: 'next', kind: 'button', x: 9, y: 1, w: 4, h: 1, z: 2 },
-      { id: 'log', kind: 'panel-log', x: 9, y: 2, w: 4, h: 2, z: 1, content: '9 users already left, are you next?' },
-      { id: 'trash', kind: 'trash', x: 1, y: 3, w: 2, h: 1, z: 3 },
-      { id: 'stack', kind: 'stack', x: 3, y: 3, w: 2, h: 1, z: 2, content: 43 },
-      { id: 'timer', kind: 'timer', x: 1, y: 4, w: 4, h: 3, z: 1 },
-      { id: 'quote', kind: 'panel-quote', x: 5, y: 4, w: 8, h: 3, z: 1, content: '"Idk man"' },
+      { id: 'headline', kind: 'headline', x: 1, y: 1, w: 7, h: 2, z: 1, content: 'What part of yourself do others misunderstand?' },
+      { id: 'next', kind: 'button_next', x: 9, y: 1, w: 4, h: 1, z: 2 },
+      { id: 'users', kind: 'users_left_panel', x: 9, y: 2, w: 4, h: 2, z: 1, content: '9 users already left, are you next?' },
+      { id: 'trash', kind: 'button_trash', x: 1, y: 3, w: 2, h: 1, z: 3 },
+      { id: 'stack', kind: 'trashed_pages_stack', x: 3, y: 3, w: 2, h: 1, z: 2, content: 43 },
+      { id: 'timer', kind: 'timer_panel', x: 1, y: 4, w: 4, h: 3, z: 1 },
+      { id: 'input', kind: 'input_panel', x: 5, y: 4, w: 8, h: 3, z: 1, content: '"Idk man"' },
     ],
   },
   {
     id: 'layout-06',
     blocks: [
-      { id: 'trash', kind: 'trash', x: 1, y: 1, w: 2, h: 1, z: 3 },
-      { id: 'stack', kind: 'stack', x: 3, y: 1, w: 2, h: 1, z: 2, content: 12 },
-      { id: 'title', kind: 'title', x: 1, y: 2, w: 7, h: 3, z: 1, content: 'Who are you when nothing is being measured?' },
-      { id: 'log', kind: 'panel-log', x: 8, y: 1, w: 5, h: 3, z: 1, content: '15 users already left, are you next?' },
-      { id: 'quote', kind: 'panel-quote', x: 8, y: 4, w: 5, h: 2, z: 1, content: '"Someone who starts things but doesn\'t finish."' },
-      { id: 'timer', kind: 'timer', x: 1, y: 5, w: 5, h: 2, z: 1 },
-      { id: 'next', kind: 'button', x: 9, y: 6, w: 3, h: 1, z: 2 },
+      { id: 'trash', kind: 'button_trash', x: 1, y: 1, w: 2, h: 1, z: 3 },
+      { id: 'stack', kind: 'trashed_pages_stack', x: 3, y: 1, w: 2, h: 1, z: 2, content: 12 },
+      { id: 'headline', kind: 'headline', x: 1, y: 2, w: 7, h: 3, z: 1, content: 'Who are you when nothing is being measured?' },
+      { id: 'users', kind: 'users_left_panel', x: 8, y: 1, w: 5, h: 3, z: 1, content: '15 users already left, are you next?' },
+      { id: 'input', kind: 'input_panel', x: 8, y: 4, w: 5, h: 2, z: 1, content: '"Someone who starts things but doesn\'t finish."' },
+      { id: 'timer', kind: 'timer_panel', x: 1, y: 5, w: 5, h: 2, z: 1 },
+      { id: 'next', kind: 'button_next', x: 9, y: 6, w: 3, h: 1, z: 2 },
     ],
   },
   {
     id: 'layout-07',
     blocks: [
-      { id: 'title', kind: 'title', x: 1, y: 1, w: 7, h: 2, z: 1, content: 'When was the last time you lost track of time?' },
-      { id: 'log', kind: 'panel-log', x: 9, y: 1, w: 4, h: 3, z: 1, content: '3 users already left, are you next?' },
-      { id: 'quote', kind: 'panel-quote', x: 1, y: 3, w: 8, h: 3, z: 1, content: '"Yesterday at 3am scrolling for no reason."' },
-      { id: 'stack', kind: 'stack', x: 9, y: 4, w: 2, h: 1, z: 2, content: 21 },
-      { id: 'trash', kind: 'trash', x: 1, y: 6, w: 2, h: 1, z: 3 },
-      { id: 'next', kind: 'button', x: 3, y: 6, w: 6, h: 1, z: 2 },
-      { id: 'timer', kind: 'timer', x: 9, y: 5, w: 4, h: 2, z: 1 },
+      { id: 'headline', kind: 'headline', x: 1, y: 1, w: 7, h: 2, z: 1, content: 'When was the last time you lost track of time?' },
+      { id: 'users', kind: 'users_left_panel', x: 9, y: 1, w: 4, h: 3, z: 1, content: '3 users already left, are you next?' },
+      { id: 'input', kind: 'input_panel', x: 1, y: 3, w: 8, h: 3, z: 1, content: '"Yesterday at 3am scrolling for no reason."' },
+      { id: 'stack', kind: 'trashed_pages_stack', x: 9, y: 4, w: 2, h: 1, z: 2, content: 21 },
+      { id: 'trash', kind: 'button_trash', x: 1, y: 6, w: 2, h: 1, z: 3 },
+      { id: 'next', kind: 'button_next', x: 3, y: 6, w: 6, h: 1, z: 2 },
+      { id: 'timer', kind: 'timer_panel', x: 9, y: 5, w: 4, h: 2, z: 1 },
     ],
   },
   {
     id: 'layout-08',
     blocks: [
-      { id: 'next', kind: 'button', x: 1, y: 1, w: 5, h: 1, z: 2 },
-      { id: 'log', kind: 'panel-log', x: 1, y: 2, w: 5, h: 3, z: 1, content: '8 users already left, are you next?' },
-      { id: 'timer', kind: 'timer', x: 1, y: 5, w: 3, h: 2, z: 1 },
-      { id: 'trash', kind: 'trash', x: 4, y: 5, w: 2, h: 1, z: 3 },
-      { id: 'stack', kind: 'stack', x: 4, y: 6, w: 2, h: 1, z: 2, content: 4 },
-      { id: 'quote', kind: 'panel-quote', x: 6, y: 1, w: 4, h: 6, z: 1, content: '"How easily they seem to belong."' },
-      { id: 'title', kind: 'title', x: 10, y: 1, w: 3, h: 5, z: 1, content: 'What do you envy in people close to you?' },
+      { id: 'next', kind: 'button_next', x: 1, y: 1, w: 5, h: 1, z: 2 },
+      { id: 'users', kind: 'users_left_panel', x: 1, y: 2, w: 5, h: 3, z: 1, content: '8 users already left, are you next?' },
+      { id: 'timer', kind: 'timer_panel', x: 1, y: 5, w: 3, h: 2, z: 1 },
+      { id: 'trash', kind: 'button_trash', x: 4, y: 5, w: 2, h: 1, z: 3 },
+      { id: 'stack', kind: 'trashed_pages_stack', x: 4, y: 6, w: 2, h: 1, z: 2, content: 4 },
+      { id: 'input', kind: 'input_panel', x: 6, y: 1, w: 4, h: 6, z: 1, content: '"How easily they seem to belong."' },
+      { id: 'headline', kind: 'headline', x: 10, y: 1, w: 3, h: 5, z: 1, content: 'What do you envy in people close to you?' },
     ],
   },
 ]
@@ -301,26 +293,26 @@ const renderBlockContent = (
   interactive: boolean,
 ) => {
   switch (block.kind) {
-    case 'title':
+    case 'headline':
       return <h1 className="block-title">{block.content ?? 'Who are you when nothing is being measured?'}</h1>
-    case 'panel-log':
+    case 'users_left_panel':
       return <LogPanel title={String(block.content ?? '15 users already left, are you next?')} records={activityRecords} />
-    case 'panel-quote':
+    case 'input_panel':
       return (
         <div className="block-panel">
           <LockedInput placeholder={String(block.content ?? '')} />
         </div>
       )
-    case 'timer':
+    case 'timer_panel':
       return (
         <div className="block-timer">
           <div className="timer-value">{timerText}</div>
           <div className="timer-label">minutes wasted here</div>
         </div>
       )
-    case 'trash':
+    case 'button_trash':
       return <span>Trash</span>
-    case 'button':
+    case 'button_next':
       if (!interactive) {
         return <span>Next Question</span>
       }
@@ -329,7 +321,7 @@ const renderBlockContent = (
           Next Question
         </button>
       )
-    case 'stack':
+    case 'trashed_pages_stack':
     {
       const count = block.content ?? 12
       return (
@@ -587,8 +579,101 @@ const ExitingBlock = ({ block, onDone }: { block: ExitingBlock; onDone: (id: str
 
 function App() {
   const [screenIndex, setScreenIndex] = useState(0)
+  const [reviewMode, setReviewMode] = useState(true)
   const [themeIndex, setThemeIndex] = useState(() => Math.floor(Math.random() * themes.length))
   const [timerText, setTimerText] = useState('00:00')
+  const baseSeedRef = useRef(Math.floor(Math.random() * 1_000_000_000))
+
+  const generatedLayouts = useMemo(() => {
+    const layouts: ScreenLayout[] = []
+    const attemptsPerLayout = 40
+    let rngSeed = baseSeedRef.current
+    const rng = () => {
+      rngSeed = (rngSeed + 0x6d2b79f5) >>> 0
+      let t = rngSeed
+      t = Math.imul(t ^ (t >>> 15), t | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+
+    const isAllDifferent = (prev: ScreenLayout, next: ScreenLayout) => {
+      const prevMap = new Map(prev.blocks.map((block) => [block.id, block]))
+      return next.blocks.every((block) => {
+        const prevBlock = prevMap.get(block.id)
+        if (!prevBlock) return true
+        return (
+          block.x !== prevBlock.x ||
+          block.y !== prevBlock.y ||
+          block.w !== prevBlock.w ||
+          block.h !== prevBlock.h
+        )
+      })
+    }
+
+    const addLayouts = (
+      count: number,
+      bias: 'any' | 'middle' | 'right' | 'inputAway',
+      seedOffset: number,
+    ) => {
+      for (let i = 0; i < count; i += 1) {
+        let generated: ScreenLayout | null = null
+        for (let attempt = 0; attempt < attemptsPerLayout; attempt += 1) {
+          const seed = baseSeedRef.current + seedOffset + i * 100 + attempt + 1
+          const candidate =
+            bias === 'inputAway'
+              ? generateRandomLayoutWithInputAwayFromEdges(seed)
+              : generateRandomLayoutWithBias(seed, bias)
+          if (candidate.blocks.length < REQUIRED_BLOCK_COUNT) continue
+          if (layouts.length > 0 && !isAllDifferent(layouts[layouts.length - 1], candidate)) continue
+          generated = candidate
+          break
+        }
+        layouts.push(generated ?? generateRandomLayout(baseSeedRef.current + seedOffset + i + 1))
+      }
+    }
+
+    const buildSequence = () => {
+      for (let i = 0; i < 70; i += 1) {
+        if (rng() < 0.2) {
+          layouts.push(predefinedLayouts[i % predefinedLayouts.length])
+          continue
+        }
+        if (i % 5 === 4) {
+          addLayouts(1, 'inputAway', 30000 + i * 100)
+        } else if (i < 50) {
+          addLayouts(1, 'any', i * 100)
+        } else if (i < 60) {
+          addLayouts(1, 'middle', 5000 + i * 100)
+        } else {
+          addLayouts(1, 'right', 10000 + i * 100)
+        }
+      }
+    }
+
+    buildSequence()
+
+    const first = layouts[0]
+    const last = layouts[layouts.length - 1]
+    if (first && last && first.blocks.length >= REQUIRED_BLOCK_COUNT) {
+      if (!isAllDifferent(first, last)) {
+        for (let attempt = 0; attempt < attemptsPerLayout; attempt += 1) {
+          const candidate = generateRandomLayout(baseSeedRef.current + 20000 + attempt)
+          if (candidate.blocks.length < REQUIRED_BLOCK_COUNT) continue
+          if (!isAllDifferent(first, candidate)) continue
+          layouts[layouts.length - 1] = candidate
+          break
+        }
+      }
+    }
+
+    return layouts
+  }, [])
+  const allLayouts = useMemo(
+    () => [...predefinedLayouts, ...generatedLayouts],
+    [generatedLayouts],
+  )
+  const reviewLayouts = useMemo(() => generatedLayouts, [generatedLayouts])
+  const activeLayouts = reviewMode ? reviewLayouts : allLayouts
 
   useEffect(() => {
     const startTime = Date.now()
@@ -605,11 +690,11 @@ function App() {
     return () => window.clearInterval(intervalId)
   }, [])
 
-  const layout = screens[screenIndex]
+  const layout = activeLayouts[screenIndex % activeLayouts.length]
   const theme = themes[themeIndex]
 
   const handleNext = () => {
-    setScreenIndex((index) => (index + 1) % screens.length)
+    setScreenIndex((index) => (index + 1) % activeLayouts.length)
     setThemeIndex((current) => {
       if (themes.length <= 1) return current
       let nextIndex = current
@@ -619,6 +704,27 @@ function App() {
       return nextIndex
     })
   }
+
+  const handlePrev = () => {
+    setScreenIndex((index) => (index - 1 + activeLayouts.length) % activeLayouts.length)
+  }
+
+  useEffect(() => {
+    if (!reviewMode) return
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowRight') {
+        handleNext()
+      } else if (event.key === 'ArrowLeft') {
+        handlePrev()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [reviewMode, activeLayouts.length])
+
+  useEffect(() => {
+    setScreenIndex(0)
+  }, [reviewMode])
 
   return (
     <div
@@ -631,6 +737,13 @@ function App() {
       }
     >
       <Canvas layout={layout} timerText={timerText} onNext={handleNext} />
+      {reviewMode && (
+        <div className="review-bar">
+          <button type="button" onClick={handlePrev}>Prev</button>
+          <span>Layout {screenIndex + 1} / {activeLayouts.length}</span>
+          <button type="button" onClick={handleNext}>Next</button>
+        </div>
+      )}
     </div>
   )
 }
