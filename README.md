@@ -2,6 +2,26 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## Supabase setup
+
+1) Create a Supabase project.
+2) In Supabase SQL editor, run the migration in `supabase/migrations/0001_init.sql`.
+3) Seed questions with `supabase/seed.sql`.
+4) Add env vars to `.env.local`:
+
+```
+VITE_SUPABASE_URL=your_project_url
+VITE_SUPABASE_ANON_KEY=your_anon_key
+VITE_APP_VERSION=dev
+```
+
+5) Install deps and run:
+
+```
+npm install
+npm run dev
+```
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh

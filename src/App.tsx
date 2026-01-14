@@ -5,10 +5,13 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
   type ReactNode,
 } from 'react'
 import './App.css'
+import { supabase } from './lib/supabaseClient'
+import { telemetry } from './lib/telemetry'
 import {
   COLS,
   ROWS,
@@ -35,6 +38,14 @@ type ExitingBlock = {
   content: ReactNode
 }
 
+type Question = {
+  id: string
+  slug: string | null
+  prompt: string
+  order_index: number | null
+  meta: Record<string, unknown> | null
+}
+
 const PADDING = 60
 const GAP = 40
 const COMPACT_BREAKPOINT = 600
@@ -42,6 +53,18 @@ const MEDIUM_BREAKPOINT = 1200
 const COMPACT_COLS = 4
 const COMPACT_MAX_ROWS = 3
 const COMPACT_SPACING = 20
+const ANSWER_SAVE_DELAY = 1000
+const TELEMETRY_DELETE_FLUSH_MS = 7000
+const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? 'dev'
+const FALLBACK_QUESTIONS: Question[] = [
+  {
+    id: 'local-setup',
+    slug: 'local-setup',
+    prompt: 'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to load questions.',
+    order_index: 1,
+    meta: {},
+  },
+]
 
 const predefinedLayouts: ScreenLayout[] = [
   {
@@ -380,16 +403,36 @@ const renderBlockContent = (
   timerText: string,
   onNext: () => void,
   interactive: boolean,
+  question: Question | null,
+  answerText: string,
+  onAnswerChange: (value: string) => void,
+  onAnswerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void,
+  onTrash: () => void,
+  trashedCount: number,
+  isEndScreen: boolean,
 ) => {
   switch (block.kind) {
     case 'headline':
-      return <h1 className="block-title">{block.content ?? 'Who are you when nothing is being measured?'}</h1>
+      return (
+        <h1 className="block-title">
+          {isEndScreen ? 'now what?' : question?.prompt ?? 'Loading question...'}
+        </h1>
+      )
     case 'users_left_panel':
       return <LogPanel title={String(block.content ?? '15 users already left, are you next?')} records={activityRecords} />
     case 'input_panel':
       return (
         <div className="block-panel">
-          <LockedInput placeholder={String(block.content ?? '')} />
+          <LockedInput
+            placeholder={
+              question?.meta && typeof question.meta.placeholder === 'string'
+                ? question.meta.placeholder
+                : ''
+            }
+            value={answerText}
+            onChange={onAnswerChange}
+            onKeyDown={onAnswerKeyDown}
+          />
         </div>
       )
     case 'timer_panel':
@@ -400,19 +443,26 @@ const renderBlockContent = (
         </div>
       )
     case 'button_trash':
-      return <span>Trash</span>
+      if (!interactive) {
+        return <span>Trash</span>
+      }
+      return (
+        <button type="button" className="block-button" onClick={onTrash}>
+          Trash
+        </button>
+      )
     case 'button_next':
       if (!interactive) {
         return <span>Next Question</span>
       }
       return (
         <button type="button" className="block-button" onClick={onNext}>
-          Next Question
+          {isEndScreen ? 'Start Again' : 'Next Question'}
         </button>
       )
     case 'trashed_pages_stack':
     {
-      const count = block.content ?? 12
+      const count = trashedCount || block.content || 0
       return (
         <div className="block-stack">
           <div className="stack-frame" aria-hidden="true">
@@ -430,33 +480,18 @@ const renderBlockContent = (
   }
 }
 
-const LockedInput = ({ placeholder }: { placeholder: string }) => {
+const LockedInput = ({
+  placeholder,
+  value,
+  onChange,
+  onKeyDown,
+}: {
+  placeholder: string
+  value: string
+  onChange: (value: string) => void
+  onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
+}) => {
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
-
-  const blockedKeys = useMemo(
-    () =>
-      new Set([
-        'Backspace',
-        'Delete',
-        'ArrowLeft',
-        'ArrowRight',
-        'ArrowUp',
-        'ArrowDown',
-        'Home',
-        'End',
-        'PageUp',
-        'PageDown',
-        'Insert',
-      ]),
-    [],
-  )
-
-  const lockCursorToEnd = () => {
-    const input = inputRef.current
-    if (!input) return
-    const end = input.value.length
-    input.setSelectionRange(end, end)
-  }
 
   return (
     <div className="locked-wrap">
@@ -466,42 +501,37 @@ const LockedInput = ({ placeholder }: { placeholder: string }) => {
         rows={6}
         placeholder={placeholder}
         autoComplete="off"
-        onKeyDown={(event) => {
-          if (event.ctrlKey || event.metaKey || event.altKey) {
-            event.preventDefault()
-            return
-          }
-          if (blockedKeys.has(event.key)) {
-            event.preventDefault()
-          }
-        }}
-        onBeforeInput={(event) => {
-          const type = event.inputType || ''
-          if (
-            type.startsWith('delete') ||
-            type === 'insertFromPaste' ||
-            type === 'insertFromDrop' ||
-            type === 'insertReplacementText'
-          ) {
-            event.preventDefault()
-          }
-        }}
-        onInput={lockCursorToEnd}
-        onMouseDown={(event) => {
-          event.preventDefault()
-          inputRef.current?.focus()
-          lockCursorToEnd()
-        }}
-        onPaste={(event) => event.preventDefault()}
-        onCopy={(event) => event.preventDefault()}
-        onCut={(event) => event.preventDefault()}
-        onFocus={lockCursorToEnd}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
       />
     </div>
   )
 }
 
-const Canvas = ({ layout, timerText, onNext }: { layout: ScreenLayout; timerText: string; onNext: () => void }) => {
+const Canvas = ({
+  layout,
+  timerText,
+  onNext,
+  question,
+  answerText,
+  onAnswerChange,
+  onAnswerKeyDown,
+  onTrash,
+  trashedCount,
+  isEndScreen,
+}: {
+  layout: ScreenLayout
+  timerText: string
+  onNext: () => void
+  question: Question | null
+  answerText: string
+  onAnswerChange: (value: string) => void
+  onAnswerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
+  onTrash: () => void
+  trashedCount: number
+  isEndScreen: boolean
+}) => {
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const blockRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const prevLayoutRef = useRef<ScreenLayout | null>(null)
@@ -592,7 +622,19 @@ const Canvas = ({ layout, timerText, onNext }: { layout: ScreenLayout; timerText
               kind: block.kind,
               rect,
               z: block.z ?? 1,
-              content: renderBlockContent(block, timerText, onNext, false),
+              content: renderBlockContent(
+                block,
+                timerText,
+                onNext,
+                false,
+                question,
+                answerText,
+                onAnswerChange,
+                onAnswerKeyDown,
+                onTrash,
+                trashedCount,
+                isEndScreen,
+              ),
             }
           })
           .filter((item): item is ExitingBlock => Boolean(item))
@@ -614,6 +656,9 @@ const Canvas = ({ layout, timerText, onNext }: { layout: ScreenLayout; timerText
   }
 
   const activeLayout = size.width < COMPACT_BREAKPOINT ? compactLayout : layout
+  const displayBlocks = isEndScreen
+    ? activeLayout.blocks.filter((block) => block.kind === 'headline' || block.kind === 'button_next')
+    : activeLayout.blocks
   const compactContentHeight = useMemo(() => {
     if (!size.width || size.width >= COMPACT_BREAKPOINT) return null
     const spacing = COMPACT_SPACING
@@ -633,7 +678,7 @@ const Canvas = ({ layout, timerText, onNext }: { layout: ScreenLayout; timerText
       ref={canvasRef}
       style={compactContentHeight ? { minHeight: Math.round(compactContentHeight) } : undefined}
     >
-      {activeLayout.blocks.map((block) => {
+      {displayBlocks.map((block) => {
         const rect = rects.get(block.id)
         if (!rect) return null
         return (
@@ -655,7 +700,19 @@ const Canvas = ({ layout, timerText, onNext }: { layout: ScreenLayout; timerText
               zIndex: block.z ?? 1,
             }}
           >
-            {renderBlockContent(block, timerText, onNext, true)}
+            {renderBlockContent(
+              block,
+              timerText,
+              onNext,
+              true,
+              question,
+              answerText,
+              onAnswerChange,
+              onAnswerKeyDown,
+              onTrash,
+              trashedCount,
+              isEndScreen,
+            )}
           </div>
         )
       })}
@@ -703,7 +760,21 @@ function App() {
   const [reviewMode, setReviewMode] = useState(true)
   const [themeIndex, setThemeIndex] = useState(() => Math.floor(Math.random() * themes.length))
   const [timerText, setTimerText] = useState('00:00')
+  const [questions, setQuestions] = useState<Question[]>([])
+  const [questionsLoading, setQuestionsLoading] = useState(true)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [trashedCount, setTrashedCount] = useState(0)
   const baseSeedRef = useRef(Math.floor(Math.random() * 1_000_000_000))
+  const sessionStartedAtRef = useRef<number | null>(null)
+  const answerSaveTimersRef = useRef<Record<string, number>>({})
+  const deleteCountsRef = useRef<Record<string, number>>({})
+  const pauseTimersRef = useRef<Record<string, number[]>>({})
+  const pauseBucketsRef = useRef<Record<string, Set<number>>>({})
+  const questionStartRef = useRef<number | null>(null)
+  const prevQuestionIdRef = useRef<string | null>(null)
+  const hasEndedSessionRef = useRef(false)
 
   const generatedLayouts = useMemo(() => {
     const layouts: ScreenLayout[] = []
@@ -795,6 +866,213 @@ function App() {
   )
   const reviewLayouts = useMemo(() => generatedLayouts, [generatedLayouts])
   const activeLayouts = reviewMode ? reviewLayouts : allLayouts
+  const currentQuestionIndex = questions.length > 0 ? screenIndex % questions.length : 0
+  const isEndScreen = questions.length > 0 && screenIndex >= questions.length
+  const currentQuestion = isEndScreen ? null : questions[currentQuestionIndex] ?? null
+  const currentAnswer = currentQuestion ? (answers[currentQuestion.id] ?? '') : ''
+
+  const clearPauseTimers = (questionId: string) => {
+    const timers = pauseTimersRef.current[questionId]
+    if (timers) {
+      timers.forEach((timerId) => window.clearTimeout(timerId))
+      delete pauseTimersRef.current[questionId]
+    }
+    delete pauseBucketsRef.current[questionId]
+  }
+
+  const armPauseTimers = (questionId: string) => {
+    clearPauseTimers(questionId)
+    const buckets = [3000, 10000, 30000]
+    pauseBucketsRef.current[questionId] = new Set()
+    pauseTimersRef.current[questionId] = buckets.map((ms) =>
+      window.setTimeout(() => {
+        const fired = pauseBucketsRef.current[questionId]
+        if (!fired || fired.has(ms)) return
+        fired.add(ms)
+        telemetry.enqueue({
+          type: 'pause',
+          question_id: questionId,
+          data: { pause_ms: ms },
+        })
+      }, ms),
+    )
+  }
+
+  const scheduleAnswerSave = (questionId: string, text: string) => {
+    if (!sessionId) return
+    const existingTimer = answerSaveTimersRef.current[questionId]
+    if (existingTimer) {
+      window.clearTimeout(existingTimer)
+    }
+    answerSaveTimersRef.current[questionId] = window.setTimeout(() => {
+      void supabase.from('answers').upsert(
+        {
+          session_id: sessionId,
+          question_id: questionId,
+          current_text: text,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'session_id,question_id' },
+      )
+    }, ANSWER_SAVE_DELAY)
+  }
+
+  const flushDeleteCounts = () => {
+    const counts = deleteCountsRef.current
+    Object.entries(counts).forEach(([questionId, count]) => {
+      if (count > 0) {
+        telemetry.enqueue({
+          type: 'delete_key',
+          question_id: questionId,
+          data: { count_delta: count },
+        })
+        counts[questionId] = 0
+      }
+    })
+  }
+
+  useEffect(() => {
+    let active = true
+    const initSession = async () => {
+      if (!supabase) return
+      const { data: authData } = await supabase.auth.getSession()
+      let user = authData.session?.user ?? null
+      if (!user) {
+        const { data, error } = await supabase.auth.signInAnonymously()
+        if (error) return
+        user = data.user
+      }
+      if (!user || !active) return
+      setUserId(user.id)
+      const { data: sessionRow, error } = await supabase
+        .from('sessions')
+        .insert({
+          user_id: user.id,
+          user_agent: navigator.userAgent,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          app_version: APP_VERSION,
+        })
+        .select('id, started_at')
+        .single()
+      if (error || !sessionRow || !active) return
+      setSessionId(sessionRow.id)
+      sessionStartedAtRef.current = new Date(sessionRow.started_at).getTime()
+    }
+    void initSession()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const loadQuestions = async () => {
+      setQuestionsLoading(true)
+      if (!supabase) {
+        if (!active) return
+        setQuestions(FALLBACK_QUESTIONS)
+        setQuestionsLoading(false)
+        return
+      }
+      const { data } = await supabase
+        .from('questions')
+        .select('id, slug, prompt, order_index, meta')
+        .order('order_index', { ascending: true, nullsFirst: false })
+      if (!active) return
+      setQuestions(data ?? [])
+      setQuestionsLoading(false)
+    }
+    void loadQuestions()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!supabase || !sessionId || !userId) return
+    telemetry.setContext({ sessionId, userId })
+    telemetry.start()
+    return () => {
+      telemetry.stop()
+    }
+  }, [sessionId, userId])
+
+  useEffect(() => {
+    if (!supabase || !sessionId || !currentQuestion || isEndScreen) return
+    const now = Date.now()
+    if (prevQuestionIdRef.current && questionStartRef.current) {
+      telemetry.enqueue({
+        type: 'question_exit',
+        question_id: prevQuestionIdRef.current,
+        data: { duration_ms: now - questionStartRef.current },
+      })
+      clearPauseTimers(prevQuestionIdRef.current)
+    }
+    telemetry.enqueue({ type: 'question_enter', question_id: currentQuestion.id })
+    prevQuestionIdRef.current = currentQuestion.id
+    questionStartRef.current = now
+    armPauseTimers(currentQuestion.id)
+  }, [currentQuestion?.id, isEndScreen, sessionId])
+
+  useEffect(() => {
+    if (!supabase || !sessionId) return
+    const intervalId = window.setInterval(() => {
+      flushDeleteCounts()
+    }, TELEMETRY_DELETE_FLUSH_MS)
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!supabase || !sessionId) return
+    const handleExit = (reason: string) => {
+      if (hasEndedSessionRef.current) return
+      hasEndedSessionRef.current = true
+      flushDeleteCounts()
+      const endedAt = new Date()
+      const startedAt = sessionStartedAtRef.current ?? endedAt.getTime()
+      const duration = Math.max(0, endedAt.getTime() - startedAt)
+      if (currentQuestion && questionStartRef.current) {
+        telemetry.enqueue({
+          type: 'question_exit',
+          question_id: currentQuestion.id,
+          data: { duration_ms: endedAt.getTime() - questionStartRef.current },
+        })
+      }
+      telemetry.enqueue({
+        type: 'session_end',
+        data: { duration_ms: duration, left_reason: reason },
+      })
+      void supabase
+        .from('sessions')
+        .update({
+          ended_at: endedAt.toISOString(),
+          duration_ms: duration,
+          left_reason: reason,
+        })
+        .eq('id', sessionId)
+      void telemetry.flush()
+    }
+
+    const handlePagehide = () => handleExit('pagehide')
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        handleExit('visibility_hidden')
+      }
+    }
+    const handleBeforeUnload = () => handleExit('beforeunload')
+
+    window.addEventListener('pagehide', handlePagehide)
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
+    return () => {
+      window.removeEventListener('pagehide', handlePagehide)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [currentQuestion, sessionId])
 
   useEffect(() => {
     const startTime = Date.now()
@@ -811,10 +1089,65 @@ function App() {
     return () => window.clearInterval(intervalId)
   }, [])
 
+  const handleAnswerChange = (value: string) => {
+    if (!currentQuestion) return
+    setAnswers((prev) => ({ ...prev, [currentQuestion.id]: value }))
+    if (supabase) {
+      scheduleAnswerSave(currentQuestion.id, value)
+    }
+    armPauseTimers(currentQuestion.id)
+  }
+
+  const handleAnswerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (!currentQuestion || !supabase) return
+    if (event.key === 'Backspace' || event.key === 'Delete') {
+      deleteCountsRef.current[currentQuestion.id] =
+        (deleteCountsRef.current[currentQuestion.id] ?? 0) + 1
+    }
+  }
+
+  const handleTrash = () => {
+    if (!supabase || !sessionId || !currentQuestion) return
+    const text = currentAnswer
+    if (text.trim().length === 0) {
+      return
+    }
+    void supabase.from('trashed_answers').insert({
+      session_id: sessionId,
+      question_id: currentQuestion.id,
+      trashed_text: text,
+      trash_reason: 'user',
+    })
+    telemetry.enqueue({
+      type: 'trash',
+      question_id: currentQuestion.id,
+      data: { trash_reason: 'user' },
+    })
+    setAnswers((prev) => ({ ...prev, [currentQuestion.id]: '' }))
+    setTrashedCount((count) => count + 1)
+    scheduleAnswerSave(currentQuestion.id, '')
+  }
+
   const layout = activeLayouts[screenIndex % activeLayouts.length]
   const theme = themes[themeIndex]
 
   const handleNext = () => {
+    if (questions.length > 0) {
+      if (screenIndex >= questions.length) {
+        setScreenIndex(0)
+        return
+      }
+      if (screenIndex >= questions.length - 1 && currentQuestion && questionStartRef.current) {
+        telemetry.enqueue({
+          type: 'question_exit',
+          question_id: currentQuestion.id,
+          data: { duration_ms: Date.now() - questionStartRef.current },
+        })
+        clearPauseTimers(currentQuestion.id)
+      }
+      setScreenIndex((index) => index + 1)
+      return
+    }
     setScreenIndex((index) => (index + 1) % activeLayouts.length)
     setThemeIndex((current) => {
       if (themes.length <= 1) return current
@@ -857,7 +1190,18 @@ function App() {
         } as CSSProperties
       }
     >
-      <Canvas layout={layout} timerText={timerText} onNext={handleNext} />
+      <Canvas
+        layout={layout}
+        timerText={timerText}
+        onNext={handleNext}
+        question={questionsLoading ? null : currentQuestion}
+        answerText={currentAnswer}
+        onAnswerChange={handleAnswerChange}
+        onAnswerKeyDown={handleAnswerKeyDown}
+        onTrash={handleTrash}
+        trashedCount={trashedCount}
+        isEndScreen={isEndScreen}
+      />
     </div>
   )
 }
