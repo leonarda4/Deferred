@@ -272,8 +272,12 @@ const usePrefersReducedMotion = () => {
       return () => mediaQuery.removeEventListener('change', handler)
     }
 
-    mediaQuery.addListener(handler)
-    return () => mediaQuery.removeListener(handler)
+    const legacy = mediaQuery as MediaQueryList & {
+      addListener?: (listener: (event: MediaQueryListEvent) => void) => void
+      removeListener?: (listener: (event: MediaQueryListEvent) => void) => void
+    }
+    legacy.addListener?.(handler)
+    return () => legacy.removeListener?.(handler)
   }, [])
 
   return prefersReducedMotion
@@ -546,7 +550,8 @@ const LockedInput = ({
           }
         }}
         onBeforeInput={(event) => {
-          const type = event.inputType || ''
+          const native = event.nativeEvent as InputEvent
+          const type = native?.inputType || ''
           if (
             type.startsWith('delete') ||
             type === 'insertFromPaste' ||
@@ -681,35 +686,34 @@ const Canvas = ({
       const exitingIds = [...prevIds].filter((id) => !nextIds.has(id))
 
       if (exitingIds.length > 0) {
-        const exiting = exitingIds
-          .map((id) => {
-            const block = previousLayout.blocks.find((item) => item.id === id)
-            const rect = prevLayoutRectsRef.current.get(id)
-            if (!block || !rect) return null
-            return {
-              id,
-              kind: block.kind,
-              rect,
-              z: block.z ?? 1,
-              content: renderBlockContent(
-                block,
-                timerText,
-                onNext,
-                false,
-                question,
-                answerText,
-                onAnswerChange,
-                onAnswerKeyDown,
-                onTrash,
-                trashedCount,
-                isEndScreen,
-                nextDisabled,
-                inputDisabled,
-                errorMessage,
-              ),
-            }
+        const exiting: ExitingBlock[] = []
+        exitingIds.forEach((id) => {
+          const block = previousLayout.blocks.find((item) => item.id === id)
+          const rect = prevLayoutRectsRef.current.get(id)
+          if (!block || !rect) return
+          exiting.push({
+            id,
+            kind: block.kind,
+            rect,
+            z: block.z ?? 1,
+            content: renderBlockContent(
+              block,
+              timerText,
+              onNext,
+              false,
+              question,
+              answerText,
+              onAnswerChange,
+              onAnswerKeyDown,
+              onTrash,
+              trashedCount,
+              isEndScreen,
+              nextDisabled,
+              inputDisabled,
+              errorMessage,
+            ),
           })
-          .filter((item): item is ExitingBlock => Boolean(item))
+        })
 
         if (exiting.length > 0) {
           setExitingBlocks((current) => [...current, ...exiting])
@@ -1021,7 +1025,7 @@ function App() {
     void registerTypingTick(currentQuestion.id)
   }
 
-  const handleAnswerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+  const handleAnswerKeyDown = (_event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (!currentQuestion) return
     void registerTypingTick(currentQuestion.id)
   }

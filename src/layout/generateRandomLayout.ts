@@ -230,8 +230,6 @@ const markOccupied = (occupied: boolean[][], x: number, y: number, w: number, h:
   }
 }
 
-const cloneOccupied = (occupied: boolean[][]) => occupied.map((row) => row.slice())
-
 const canGrow = (block: GridBlock, spec: BlockSpec, dir: 'left' | 'right' | 'up' | 'down') => {
   if (dir === 'left' || dir === 'right') {
     const nextW = block.w + 1
