@@ -334,7 +334,9 @@ const renderBlockContent = (
       const count = block.content ?? 12
       return (
         <div className="block-stack">
-          <div className="stack-icon" aria-hidden="true"></div>
+          <div className="stack-frame" aria-hidden="true">
+            <div className="stack-icon"></div>
+          </div>
           <div>
             <div className="stack-count">{count}</div>
             <div className="stack-label">trashed pages</div>
