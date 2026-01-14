@@ -492,6 +492,32 @@ const LockedInput = ({
   onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
 }) => {
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const blockedKeys = useMemo(
+    () =>
+      new Set([
+        'Backspace',
+        'Delete',
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Home',
+        'End',
+        'PageUp',
+        'PageDown',
+        'Insert',
+      ]),
+    [],
+  )
+
+  const lockCursorToEnd = () => {
+    const input = inputRef.current
+    if (!input) return
+    const end = input.value.length
+    requestAnimationFrame(() => {
+      input.setSelectionRange(end, end)
+    })
+  }
 
   return (
     <div className="locked-wrap">
@@ -503,7 +529,38 @@ const LockedInput = ({
         autoComplete="off"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        onKeyDown={onKeyDown}
+        onKeyDown={(event) => {
+          onKeyDown(event)
+          if (event.ctrlKey || event.metaKey || event.altKey) {
+            event.preventDefault()
+            return
+          }
+          if (blockedKeys.has(event.key)) {
+            event.preventDefault()
+          }
+        }}
+        onBeforeInput={(event) => {
+          const type = event.inputType || ''
+          if (
+            type.startsWith('delete') ||
+            type === 'insertFromPaste' ||
+            type === 'insertFromDrop' ||
+            type === 'insertReplacementText'
+          ) {
+            event.preventDefault()
+          }
+        }}
+        onInput={lockCursorToEnd}
+        onFocus={lockCursorToEnd}
+        onSelect={lockCursorToEnd}
+        onMouseDown={(event) => {
+          event.preventDefault()
+          inputRef.current?.focus()
+          lockCursorToEnd()
+        }}
+        onPaste={(event) => event.preventDefault()}
+        onCopy={(event) => event.preventDefault()}
+        onCut={(event) => event.preventDefault()}
       />
     </div>
   )
@@ -979,7 +1036,8 @@ function App() {
         .select('id, slug, prompt, order_index, meta')
         .order('order_index', { ascending: true, nullsFirst: false })
       if (!active) return
-      setQuestions(data ?? [])
+      const loaded = data ?? []
+      setQuestions(loaded.length > 0 ? loaded : FALLBACK_QUESTIONS)
       setQuestionsLoading(false)
     }
     void loadQuestions()
@@ -1109,22 +1167,21 @@ function App() {
   const handleTrash = () => {
     if (!supabase || !sessionId || !currentQuestion) return
     const text = currentAnswer
-    if (text.trim().length === 0) {
-      return
+    if (text.trim().length > 0) {
+      void supabase.from('trashed_answers').insert({
+        session_id: sessionId,
+        question_id: currentQuestion.id,
+        trashed_text: text,
+        trash_reason: 'user',
+      })
+      telemetry.enqueue({
+        type: 'trash',
+        question_id: currentQuestion.id,
+        data: { trash_reason: 'user' },
+      })
+      setTrashedCount((count) => count + 1)
     }
-    void supabase.from('trashed_answers').insert({
-      session_id: sessionId,
-      question_id: currentQuestion.id,
-      trashed_text: text,
-      trash_reason: 'user',
-    })
-    telemetry.enqueue({
-      type: 'trash',
-      question_id: currentQuestion.id,
-      data: { trash_reason: 'user' },
-    })
     setAnswers((prev) => ({ ...prev, [currentQuestion.id]: '' }))
-    setTrashedCount((count) => count + 1)
     scheduleAnswerSave(currentQuestion.id, '')
   }
 

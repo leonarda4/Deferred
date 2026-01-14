@@ -161,6 +161,10 @@
   justify-content: center;
 }
 
+.block--button_trash .block-button {
+  color: #fdf8e6;
+}
+
 .block--button_next {
   background: var(--accent);
   border: 1px solid #1c1b16;
