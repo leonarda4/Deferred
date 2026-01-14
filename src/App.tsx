@@ -10,8 +10,17 @@ import {
   type ReactNode,
 } from 'react'
 import './App.css'
-import { supabase } from './lib/supabaseClient'
-import { telemetry } from './lib/telemetry'
+import {
+  endSessionBestEffort,
+  fetchQuestionByOrder,
+  getStoredOrderIndex,
+  onNext as trackNext,
+  onQuestionRender,
+  onTrash as trackTrash,
+  registerTypingTick,
+  setStoredOrderIndex,
+  type Question,
+} from './lib/deferredTracking'
 import {
   COLS,
   ROWS,
@@ -38,14 +47,6 @@ type ExitingBlock = {
   content: ReactNode
 }
 
-type Question = {
-  id: string
-  slug: string | null
-  prompt: string
-  order_index: number | null
-  meta: Record<string, unknown> | null
-}
-
 const PADDING = 60
 const GAP = 40
 const COMPACT_BREAKPOINT = 600
@@ -53,18 +54,6 @@ const MEDIUM_BREAKPOINT = 1200
 const COMPACT_COLS = 4
 const COMPACT_MAX_ROWS = 3
 const COMPACT_SPACING = 20
-const ANSWER_SAVE_DELAY = 1000
-const TELEMETRY_DELETE_FLUSH_MS = 7000
-const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? 'dev'
-const FALLBACK_QUESTIONS: Question[] = [
-  {
-    id: 'local-setup',
-    slug: 'local-setup',
-    prompt: 'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to load questions.',
-    order_index: 1,
-    meta: {},
-  },
-]
 
 const predefinedLayouts: ScreenLayout[] = [
   {
@@ -410,12 +399,17 @@ const renderBlockContent = (
   onTrash: () => void,
   trashedCount: number,
   isEndScreen: boolean,
+  nextDisabled: boolean,
+  inputDisabled: boolean,
+  errorMessage: string | null,
 ) => {
   switch (block.kind) {
     case 'headline':
       return (
         <h1 className="block-title">
-          {isEndScreen ? 'now what?' : question?.prompt ?? 'Loading question...'}
+          {isEndScreen
+            ? 'now what?'
+            : errorMessage ?? question?.prompt ?? 'Loading question...'}
         </h1>
       )
     case 'users_left_panel':
@@ -432,6 +426,7 @@ const renderBlockContent = (
             value={answerText}
             onChange={onAnswerChange}
             onKeyDown={onAnswerKeyDown}
+            disabled={inputDisabled}
           />
         </div>
       )
@@ -456,7 +451,12 @@ const renderBlockContent = (
         return <span>Next Question</span>
       }
       return (
-        <button type="button" className="block-button" onClick={onNext}>
+        <button
+          type="button"
+          className="block-button"
+          onClick={onNext}
+          disabled={nextDisabled}
+        >
           {isEndScreen ? 'Start Again' : 'Next Question'}
         </button>
       )
@@ -485,11 +485,13 @@ const LockedInput = ({
   value,
   onChange,
   onKeyDown,
+  disabled,
 }: {
   placeholder: string
   value: string
   onChange: (value: string) => void
   onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
+  disabled: boolean
 }) => {
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const blockedKeys = useMemo(
@@ -527,6 +529,10 @@ const LockedInput = ({
         rows={6}
         placeholder={placeholder}
         autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        disabled={disabled}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
@@ -577,6 +583,9 @@ const Canvas = ({
   onTrash,
   trashedCount,
   isEndScreen,
+  nextDisabled,
+  inputDisabled,
+  errorMessage,
 }: {
   layout: ScreenLayout
   timerText: string
@@ -588,6 +597,9 @@ const Canvas = ({
   onTrash: () => void
   trashedCount: number
   isEndScreen: boolean
+  nextDisabled: boolean
+  inputDisabled: boolean
+  errorMessage: string | null
 }) => {
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const blockRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -691,6 +703,9 @@ const Canvas = ({
                 onTrash,
                 trashedCount,
                 isEndScreen,
+                nextDisabled,
+                inputDisabled,
+                errorMessage,
               ),
             }
           })
@@ -769,6 +784,9 @@ const Canvas = ({
               onTrash,
               trashedCount,
               isEndScreen,
+              nextDisabled,
+              inputDisabled,
+              errorMessage,
             )}
           </div>
         )
@@ -813,25 +831,17 @@ const ExitingBlock = ({ block, onDone }: { block: ExitingBlock; onDone: (id: str
 }
 
 function App() {
-  const [screenIndex, setScreenIndex] = useState(0)
-  const [reviewMode, setReviewMode] = useState(true)
+  const [orderIndex, setOrderIndex] = useState(() => getStoredOrderIndex())
+  const [reviewMode] = useState(false)
   const [themeIndex, setThemeIndex] = useState(() => Math.floor(Math.random() * themes.length))
   const [timerText, setTimerText] = useState('00:00')
-  const [questions, setQuestions] = useState<Question[]>([])
-  const [questionsLoading, setQuestionsLoading] = useState(true)
-  const [userId, setUserId] = useState<string | null>(null)
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
+  const [questionLoading, setQuestionLoading] = useState(true)
+  const [questionError, setQuestionError] = useState<string | null>(null)
+  const [inputValue, setInputValue] = useState('')
+  const [isEndScreen, setIsEndScreen] = useState(false)
   const [trashedCount, setTrashedCount] = useState(0)
   const baseSeedRef = useRef(Math.floor(Math.random() * 1_000_000_000))
-  const sessionStartedAtRef = useRef<number | null>(null)
-  const answerSaveTimersRef = useRef<Record<string, number>>({})
-  const deleteCountsRef = useRef<Record<string, number>>({})
-  const pauseTimersRef = useRef<Record<string, number[]>>({})
-  const pauseBucketsRef = useRef<Record<string, Set<number>>>({})
-  const questionStartRef = useRef<number | null>(null)
-  const prevQuestionIdRef = useRef<string | null>(null)
-  const hasEndedSessionRef = useRef(false)
 
   const generatedLayouts = useMemo(() => {
     const layouts: ScreenLayout[] = []
@@ -923,214 +933,72 @@ function App() {
   )
   const reviewLayouts = useMemo(() => generatedLayouts, [generatedLayouts])
   const activeLayouts = reviewMode ? reviewLayouts : allLayouts
-  const currentQuestionIndex = questions.length > 0 ? screenIndex % questions.length : 0
-  const isEndScreen = questions.length > 0 && screenIndex >= questions.length
-  const currentQuestion = isEndScreen ? null : questions[currentQuestionIndex] ?? null
-  const currentAnswer = currentQuestion ? (answers[currentQuestion.id] ?? '') : ''
-
-  const clearPauseTimers = (questionId: string) => {
-    const timers = pauseTimersRef.current[questionId]
-    if (timers) {
-      timers.forEach((timerId) => window.clearTimeout(timerId))
-      delete pauseTimersRef.current[questionId]
-    }
-    delete pauseBucketsRef.current[questionId]
-  }
-
-  const armPauseTimers = (questionId: string) => {
-    clearPauseTimers(questionId)
-    const buckets = [3000, 10000, 30000]
-    pauseBucketsRef.current[questionId] = new Set()
-    pauseTimersRef.current[questionId] = buckets.map((ms) =>
-      window.setTimeout(() => {
-        const fired = pauseBucketsRef.current[questionId]
-        if (!fired || fired.has(ms)) return
-        fired.add(ms)
-        telemetry.enqueue({
-          type: 'pause',
-          question_id: questionId,
-          data: { pause_ms: ms },
-        })
-      }, ms),
-    )
-  }
-
-  const scheduleAnswerSave = (questionId: string, text: string) => {
-    if (!sessionId) return
-    const existingTimer = answerSaveTimersRef.current[questionId]
-    if (existingTimer) {
-      window.clearTimeout(existingTimer)
-    }
-    answerSaveTimersRef.current[questionId] = window.setTimeout(() => {
-      void supabase.from('answers').upsert(
-        {
-          session_id: sessionId,
-          question_id: questionId,
-          current_text: text,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'session_id,question_id' },
-      )
-    }, ANSWER_SAVE_DELAY)
-  }
-
-  const flushDeleteCounts = () => {
-    const counts = deleteCountsRef.current
-    Object.entries(counts).forEach(([questionId, count]) => {
-      if (count > 0) {
-        telemetry.enqueue({
-          type: 'delete_key',
-          question_id: questionId,
-          data: { count_delta: count },
-        })
-        counts[questionId] = 0
-      }
-    })
-  }
+  const inputDisabled = questionLoading || Boolean(questionError) || isEndScreen
+  const nextDisabled =
+    !isEndScreen && (questionLoading || Boolean(questionError) || inputValue.trim().length === 0)
 
   useEffect(() => {
-    let active = true
-    const initSession = async () => {
-      if (!supabase) return
-      const { data: authData } = await supabase.auth.getSession()
-      let user = authData.session?.user ?? null
-      if (!user) {
-        const { data, error } = await supabase.auth.signInAnonymously()
-        if (error) return
-        user = data.user
-      }
-      if (!user || !active) return
-      setUserId(user.id)
-      const { data: sessionRow, error } = await supabase
-        .from('sessions')
-        .insert({
-          user_id: user.id,
-          user_agent: navigator.userAgent,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          app_version: APP_VERSION,
-        })
-        .select('id, started_at')
-        .single()
-      if (error || !sessionRow || !active) return
-      setSessionId(sessionRow.id)
-      sessionStartedAtRef.current = new Date(sessionRow.started_at).getTime()
-    }
-    void initSession()
-    return () => {
-      active = false
+    if (!window.localStorage.getItem('deferred_current_order_index')) {
+      setStoredOrderIndex(1)
     }
   }, [])
 
   useEffect(() => {
     let active = true
-    const loadQuestions = async () => {
-      setQuestionsLoading(true)
-      if (!supabase) {
+    const loadQuestion = async () => {
+      setQuestionLoading(true)
+      setQuestionError(null)
+      try {
+        const question = await fetchQuestionByOrder(orderIndex)
         if (!active) return
-        setQuestions(FALLBACK_QUESTIONS)
-        setQuestionsLoading(false)
-        return
+        if (!question) {
+          setIsEndScreen(true)
+          setCurrentQuestion(null)
+          setQuestionLoading(false)
+          return
+        }
+        setIsEndScreen(false)
+        setCurrentQuestion(question)
+        setInputValue('')
+        setQuestionLoading(false)
+      } catch (error) {
+        console.error('Failed to load question', error)
+        if (!active) return
+        setCurrentQuestion(null)
+        setIsEndScreen(false)
+        setQuestionError('Unable to load questions right now.')
+        setQuestionLoading(false)
       }
-      const { data } = await supabase
-        .from('questions')
-        .select('id, slug, prompt, order_index, meta')
-        .order('order_index', { ascending: true, nullsFirst: false })
-      if (!active) return
-      const loaded = data ?? []
-      setQuestions(loaded.length > 0 ? loaded : FALLBACK_QUESTIONS)
-      setQuestionsLoading(false)
     }
-    void loadQuestions()
+    void loadQuestion()
     return () => {
       active = false
     }
+  }, [orderIndex])
+
+  useEffect(() => {
+    setStoredOrderIndex(orderIndex)
+  }, [orderIndex])
+
+  useEffect(() => {
+    if (!currentQuestion || isEndScreen || questionError) return
+    const run = async () => {
+      await onQuestionRender(currentQuestion.id)
+    }
+    void run()
+  }, [currentQuestion, isEndScreen, questionError])
+
+  useEffect(() => {
+    const handleExit = () => {
+      void endSessionBestEffort()
+    }
+    window.addEventListener('beforeunload', handleExit)
+    window.addEventListener('pagehide', handleExit)
+    return () => {
+      window.removeEventListener('beforeunload', handleExit)
+      window.removeEventListener('pagehide', handleExit)
+    }
   }, [])
-
-  useEffect(() => {
-    if (!supabase || !sessionId || !userId) return
-    telemetry.setContext({ sessionId, userId })
-    telemetry.start()
-    return () => {
-      telemetry.stop()
-    }
-  }, [sessionId, userId])
-
-  useEffect(() => {
-    if (!supabase || !sessionId || !currentQuestion || isEndScreen) return
-    const now = Date.now()
-    if (prevQuestionIdRef.current && questionStartRef.current) {
-      telemetry.enqueue({
-        type: 'question_exit',
-        question_id: prevQuestionIdRef.current,
-        data: { duration_ms: now - questionStartRef.current },
-      })
-      clearPauseTimers(prevQuestionIdRef.current)
-    }
-    telemetry.enqueue({ type: 'question_enter', question_id: currentQuestion.id })
-    prevQuestionIdRef.current = currentQuestion.id
-    questionStartRef.current = now
-    armPauseTimers(currentQuestion.id)
-  }, [currentQuestion?.id, isEndScreen, sessionId])
-
-  useEffect(() => {
-    if (!supabase || !sessionId) return
-    const intervalId = window.setInterval(() => {
-      flushDeleteCounts()
-    }, TELEMETRY_DELETE_FLUSH_MS)
-    return () => {
-      window.clearInterval(intervalId)
-    }
-  }, [sessionId])
-
-  useEffect(() => {
-    if (!supabase || !sessionId) return
-    const handleExit = (reason: string) => {
-      if (hasEndedSessionRef.current) return
-      hasEndedSessionRef.current = true
-      flushDeleteCounts()
-      const endedAt = new Date()
-      const startedAt = sessionStartedAtRef.current ?? endedAt.getTime()
-      const duration = Math.max(0, endedAt.getTime() - startedAt)
-      if (currentQuestion && questionStartRef.current) {
-        telemetry.enqueue({
-          type: 'question_exit',
-          question_id: currentQuestion.id,
-          data: { duration_ms: endedAt.getTime() - questionStartRef.current },
-        })
-      }
-      telemetry.enqueue({
-        type: 'session_end',
-        data: { duration_ms: duration, left_reason: reason },
-      })
-      void supabase
-        .from('sessions')
-        .update({
-          ended_at: endedAt.toISOString(),
-          duration_ms: duration,
-          left_reason: reason,
-        })
-        .eq('id', sessionId)
-      void telemetry.flush()
-    }
-
-    const handlePagehide = () => handleExit('pagehide')
-    const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') {
-        handleExit('visibility_hidden')
-      }
-    }
-    const handleBeforeUnload = () => handleExit('beforeunload')
-
-    window.addEventListener('pagehide', handlePagehide)
-    document.addEventListener('visibilitychange', handleVisibility)
-    window.addEventListener('beforeunload', handleBeforeUnload)
-
-    return () => {
-      window.removeEventListener('pagehide', handlePagehide)
-      document.removeEventListener('visibilitychange', handleVisibility)
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-    }
-  }, [currentQuestion, sessionId])
 
   useEffect(() => {
     const startTime = Date.now()
@@ -1149,63 +1017,38 @@ function App() {
 
   const handleAnswerChange = (value: string) => {
     if (!currentQuestion) return
-    setAnswers((prev) => ({ ...prev, [currentQuestion.id]: value }))
-    if (supabase) {
-      scheduleAnswerSave(currentQuestion.id, value)
-    }
-    armPauseTimers(currentQuestion.id)
+    setInputValue(value)
+    void registerTypingTick(currentQuestion.id)
   }
 
   const handleAnswerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (!currentQuestion || !supabase) return
-    if (event.key === 'Backspace' || event.key === 'Delete') {
-      deleteCountsRef.current[currentQuestion.id] =
-        (deleteCountsRef.current[currentQuestion.id] ?? 0) + 1
-    }
+    if (!currentQuestion) return
+    void registerTypingTick(currentQuestion.id)
   }
 
-  const handleTrash = () => {
-    if (!supabase || !sessionId || !currentQuestion) return
-    const text = currentAnswer
-    if (text.trim().length > 0) {
-      void supabase.from('trashed_answers').insert({
-        session_id: sessionId,
-        question_id: currentQuestion.id,
-        trashed_text: text,
-        trash_reason: 'user',
-      })
-      telemetry.enqueue({
-        type: 'trash',
-        question_id: currentQuestion.id,
-        data: { trash_reason: 'user' },
-      })
-      setTrashedCount((count) => count + 1)
-    }
-    setAnswers((prev) => ({ ...prev, [currentQuestion.id]: '' }))
-    scheduleAnswerSave(currentQuestion.id, '')
+  const handleTrash = async () => {
+    if (!currentQuestion) return
+    await trackTrash(currentQuestion.id, inputValue)
+    setInputValue('')
+    setTrashedCount((count) => count + 1)
   }
 
-  const layout = activeLayouts[screenIndex % activeLayouts.length]
+  const layout = activeLayouts[orderIndex % activeLayouts.length]
   const theme = themes[themeIndex]
 
-  const handleNext = () => {
-    if (questions.length > 0) {
-      if (screenIndex >= questions.length) {
-        setScreenIndex(0)
-        return
-      }
-      if (screenIndex >= questions.length - 1 && currentQuestion && questionStartRef.current) {
-        telemetry.enqueue({
-          type: 'question_exit',
-          question_id: currentQuestion.id,
-          data: { duration_ms: Date.now() - questionStartRef.current },
-        })
-        clearPauseTimers(currentQuestion.id)
-      }
-      setScreenIndex((index) => index + 1)
+  const handleNext = async () => {
+    if (isEndScreen) {
+      setStoredOrderIndex(1)
+      setOrderIndex(1)
+      setInputValue('')
       return
     }
-    setScreenIndex((index) => (index + 1) % activeLayouts.length)
+    if (!currentQuestion || nextDisabled) return
+    await trackNext(currentQuestion.id, inputValue)
+    const nextIndex = orderIndex + 1
+    setStoredOrderIndex(nextIndex)
+    setOrderIndex(nextIndex)
+    setInputValue('')
     setThemeIndex((current) => {
       if (themes.length <= 1) return current
       let nextIndex = current
@@ -1215,27 +1058,6 @@ function App() {
       return nextIndex
     })
   }
-
-  const handlePrev = () => {
-    setScreenIndex((index) => (index - 1 + activeLayouts.length) % activeLayouts.length)
-  }
-
-  useEffect(() => {
-    if (!reviewMode) return
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === 'ArrowRight') {
-        handleNext()
-      } else if (event.key === 'ArrowLeft') {
-        handlePrev()
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [reviewMode, activeLayouts.length])
-
-  useEffect(() => {
-    setScreenIndex(0)
-  }, [reviewMode])
 
   return (
     <div
@@ -1251,13 +1073,16 @@ function App() {
         layout={layout}
         timerText={timerText}
         onNext={handleNext}
-        question={questionsLoading ? null : currentQuestion}
-        answerText={currentAnswer}
+        question={questionLoading ? null : currentQuestion}
+        answerText={inputValue}
         onAnswerChange={handleAnswerChange}
         onAnswerKeyDown={handleAnswerKeyDown}
         onTrash={handleTrash}
         trashedCount={trashedCount}
         isEndScreen={isEndScreen}
+        nextDisabled={nextDisabled}
+        inputDisabled={inputDisabled}
+        errorMessage={questionError}
       />
     </div>
   )
