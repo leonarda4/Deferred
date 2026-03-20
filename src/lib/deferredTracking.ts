@@ -15,6 +15,23 @@ export type TrashedPage = {
   created_at: string | null
 }
 
+export const fetchPlaceholderPool = async () => {
+  try {
+    const client = ensureSupabase()
+    const { data, error } = await client.from('placeholders').select('content')
+    if (error) {
+      console.error('Failed to fetch placeholders', error)
+      return []
+    }
+    return (data ?? [])
+      .map((row) => String(row.content ?? '').trim())
+      .filter((value) => value.length > 0)
+  } catch (error) {
+    console.error('Failed to fetch placeholders', error)
+    return []
+  }
+}
+
 const STORAGE_KEYS = {
   userId: 'deferred_user_id',
   sessionId: 'deferred_session_id',

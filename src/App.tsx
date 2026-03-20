@@ -19,6 +19,7 @@ import {
   onNext as trackNext,
   onQuestionRender,
   onTrash as trackTrash,
+  fetchPlaceholderPool,
   registerTypingTick,
   setStoredOrderIndex,
   type Question,
@@ -403,6 +404,7 @@ const renderBlockContent = (
   answerText: string,
   onAnswerChange: (value: string) => void,
   onAnswerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void,
+  inputPlaceholder: string,
   onTrash: () => void,
   onOpenTrashPreview: () => void,
   trashedCount: number | null,
@@ -426,11 +428,7 @@ const renderBlockContent = (
       return (
         <div className="block-panel">
           <LockedInput
-            placeholder={
-              question?.meta && typeof question.meta.placeholder === 'string'
-                ? question.meta.placeholder
-                : ''
-            }
+            placeholder={inputPlaceholder}
             value={answerText}
             onChange={onAnswerChange}
             onKeyDown={onAnswerKeyDown}
@@ -620,6 +618,7 @@ const Canvas = ({
   answerText: string
   onAnswerChange: (value: string) => void
   onAnswerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
+  inputPlaceholder: string
   onTrash: () => void
   onOpenTrashPreview: () => void
   trashedCount: number | null
@@ -727,6 +726,7 @@ const Canvas = ({
   answerText,
   onAnswerChange,
   onAnswerKeyDown,
+  inputPlaceholder,
   onTrash,
   onOpenTrashPreview,
   trashedCount,
@@ -808,6 +808,7 @@ const Canvas = ({
               answerText,
               onAnswerChange,
               onAnswerKeyDown,
+              inputPlaceholder,
               onTrash,
               onOpenTrashPreview,
               trashedCount,
@@ -873,6 +874,8 @@ function App() {
   const [trashPreviewOpen, setTrashPreviewOpen] = useState(false)
   const [trashPreviewLoading, setTrashPreviewLoading] = useState(false)
   const [trashPreviewError, setTrashPreviewError] = useState<string | null>(null)
+  const [placeholderPool, setPlaceholderPool] = useState<string[]>([])
+  const [inputPlaceholder, setInputPlaceholder] = useState('')
   const baseSeedRef = useRef(Math.floor(Math.random() * 1_000_000_000))
 
   const generatedLayouts = useMemo(() => {
@@ -977,6 +980,19 @@ function App() {
 
   useEffect(() => {
     let active = true
+    const run = async () => {
+      const pool = await fetchPlaceholderPool()
+      if (!active) return
+      setPlaceholderPool(pool)
+    }
+    void run()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
     const loadQuestion = async () => {
       setQuestionLoading(true)
       setQuestionError(null)
@@ -1010,6 +1026,22 @@ function App() {
       active = false
     }
   }, [orderIndex])
+
+  useEffect(() => {
+    if (!currentQuestion || isEndScreen || placeholderPool.length === 0) {
+      if (
+        currentQuestion?.meta &&
+        typeof currentQuestion.meta.placeholder === 'string'
+      ) {
+        setInputPlaceholder(currentQuestion.meta.placeholder)
+      } else {
+        setInputPlaceholder('')
+      }
+      return
+    }
+    const random = placeholderPool[Math.floor(Math.random() * placeholderPool.length)] ?? ''
+    setInputPlaceholder(random)
+  }, [currentQuestion, isEndScreen, placeholderPool])
 
   useEffect(() => {
     setStoredOrderIndex(orderIndex)
@@ -1156,14 +1188,15 @@ function App() {
           theme={theme}
         />
       ) : (
-        <Canvas
-          layout={layout}
-          timerText={timerText}
-          onNext={handleNext}
+          <Canvas
+            layout={layout}
+            timerText={timerText}
+            onNext={handleNext}
             question={questionLoading ? null : currentQuestion}
             answerText={inputValue}
             onAnswerChange={handleAnswerChange}
             onAnswerKeyDown={handleAnswerKeyDown}
+            inputPlaceholder={inputPlaceholder}
             onTrash={handleTrash}
             onOpenTrashPreview={openTrashPreview}
             trashedCount={trashedCount}

@@ -243,6 +243,10 @@
   caret-color: #14110f;
 }
 
+.locked-input::placeholder {
+  color: rgba(20, 17, 15, 0.45);
+}
+
 
 .block--input_panel {
   overflow: hidden;
