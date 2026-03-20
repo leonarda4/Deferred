@@ -13,6 +13,8 @@ import './App.css'
 import {
   endSessionBestEffort,
   fetchQuestionByOrder,
+  fetchTrashedCount,
+  fetchTrashedPages,
   getStoredOrderIndex,
   onNext as trackNext,
   onQuestionRender,
@@ -20,6 +22,7 @@ import {
   registerTypingTick,
   setStoredOrderIndex,
   type Question,
+  type TrashedPage,
 } from './lib/deferredTracking'
 import {
   COLS,
@@ -401,7 +404,8 @@ const renderBlockContent = (
   onAnswerChange: (value: string) => void,
   onAnswerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void,
   onTrash: () => void,
-  trashedCount: number,
+  onOpenTrashPreview: () => void,
+  trashedCount: number | null,
   isEndScreen: boolean,
   nextDisabled: boolean,
   inputDisabled: boolean,
@@ -466,17 +470,32 @@ const renderBlockContent = (
       )
     case 'trashed_pages_stack':
     {
-      const count = trashedCount || block.content || 0
+      const count = trashedCount ?? 0
+      if (!interactive) {
+        return (
+          <div className="block-stack">
+            <div className="stack-frame" aria-hidden="true">
+              <div className="stack-icon"></div>
+            </div>
+            <div>
+              <div className="stack-count">{count}</div>
+              <div className="stack-label">trashed pages</div>
+            </div>
+          </div>
+        )
+      }
       return (
-        <div className="block-stack">
-          <div className="stack-frame" aria-hidden="true">
-            <div className="stack-icon"></div>
+        <button type="button" className="block-stack-button" onClick={onOpenTrashPreview}>
+          <div className="block-stack">
+            <div className="stack-frame" aria-hidden="true">
+              <div className="stack-icon"></div>
+            </div>
+            <div>
+              <div className="stack-count">{count}</div>
+              <div className="stack-label">trashed pages</div>
+            </div>
           </div>
-          <div>
-            <div className="stack-count">{count}</div>
-            <div className="stack-label">trashed pages</div>
-          </div>
-        </div>
+        </button>
       )
     }
     default:
@@ -585,7 +604,9 @@ const Canvas = ({
   answerText,
   onAnswerChange,
   onAnswerKeyDown,
+  inputPlaceholder,
   onTrash,
+  onOpenTrashPreview,
   trashedCount,
   isEndScreen,
   nextDisabled,
@@ -600,7 +621,8 @@ const Canvas = ({
   onAnswerChange: (value: string) => void
   onAnswerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
   onTrash: () => void
-  trashedCount: number
+  onOpenTrashPreview: () => void
+  trashedCount: number | null
   isEndScreen: boolean
   nextDisabled: boolean
   inputDisabled: boolean
@@ -701,16 +723,17 @@ const Canvas = ({
               timerText,
               onNext,
               false,
-              question,
-              answerText,
-              onAnswerChange,
-              onAnswerKeyDown,
-              onTrash,
-              trashedCount,
-              isEndScreen,
-              nextDisabled,
-              inputDisabled,
-              errorMessage,
+  question,
+  answerText,
+  onAnswerChange,
+  onAnswerKeyDown,
+  onTrash,
+  onOpenTrashPreview,
+  trashedCount,
+  isEndScreen,
+  nextDisabled,
+  inputDisabled,
+  errorMessage,
             ),
           })
         })
@@ -786,6 +809,7 @@ const Canvas = ({
               onAnswerChange,
               onAnswerKeyDown,
               onTrash,
+              onOpenTrashPreview,
               trashedCount,
               isEndScreen,
               nextDisabled,
@@ -844,7 +868,11 @@ function App() {
   const [questionError, setQuestionError] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const [isEndScreen, setIsEndScreen] = useState(false)
-  const [trashedCount, setTrashedCount] = useState(0)
+  const [trashedCount, setTrashedCount] = useState<number | null>(null)
+  const [trashedPages, setTrashedPages] = useState<TrashedPage[]>([])
+  const [trashPreviewOpen, setTrashPreviewOpen] = useState(false)
+  const [trashPreviewLoading, setTrashPreviewLoading] = useState(false)
+  const [trashPreviewError, setTrashPreviewError] = useState<string | null>(null)
   const baseSeedRef = useRef(Math.floor(Math.random() * 1_000_000_000))
 
   const generatedLayouts = useMemo(() => {
@@ -968,6 +996,9 @@ function App() {
       } catch (error) {
         console.error('Failed to load question', error)
         if (!active) return
+        if (error instanceof Error && /aborted/i.test(error.message)) {
+          return
+        }
         setCurrentQuestion(null)
         setIsEndScreen(false)
         setQuestionError('Unable to load questions right now.')
@@ -991,6 +1022,25 @@ function App() {
     }
     void run()
   }, [currentQuestion, isEndScreen, questionError])
+
+  useEffect(() => {
+    if (!currentQuestion || isEndScreen) {
+      setTrashedCount(null)
+      setTrashedPages([])
+      setTrashPreviewOpen(false)
+      return
+    }
+    let active = true
+    const run = async () => {
+      const count = await fetchTrashedCount(currentQuestion.id)
+      if (!active) return
+      setTrashedCount(count)
+    }
+    void run()
+    return () => {
+      active = false
+    }
+  }, [currentQuestion, isEndScreen])
 
   useEffect(() => {
     const handleExit = () => {
@@ -1032,9 +1082,14 @@ function App() {
 
   const handleTrash = async () => {
     if (!currentQuestion) return
+    if (inputValue.trim().length === 0) return
     await trackTrash(currentQuestion.id, inputValue)
     setInputValue('')
-    setTrashedCount((count) => count + 1)
+    setTrashedCount((count) => (count ?? 0) + 1)
+    if (trashPreviewOpen) {
+      const pages = await fetchTrashedPages(currentQuestion.id)
+      setTrashedPages(pages)
+    }
   }
 
   const layout = activeLayouts[orderIndex % activeLayouts.length]
@@ -1063,6 +1118,24 @@ function App() {
     })
   }
 
+  const openTrashPreview = async () => {
+    if (!currentQuestion || isEndScreen) return
+    setTrashPreviewOpen(true)
+    setTrashPreviewLoading(true)
+    setTrashPreviewError(null)
+    const pages = await fetchTrashedPages(currentQuestion.id)
+    setTrashedPages(pages)
+    setTrashPreviewLoading(false)
+    if (pages.length === 0) {
+      setTrashPreviewError('No trashed pages yet for this question.')
+    }
+  }
+
+  const closeTrashPreview = () => {
+    setTrashPreviewOpen(false)
+    setTrashPreviewError(null)
+  }
+
   return (
     <div
       className="app"
@@ -1073,23 +1146,101 @@ function App() {
         } as CSSProperties
       }
     >
-      <Canvas
-        layout={layout}
-        timerText={timerText}
-        onNext={handleNext}
-        question={questionLoading ? null : currentQuestion}
-        answerText={inputValue}
-        onAnswerChange={handleAnswerChange}
-        onAnswerKeyDown={handleAnswerKeyDown}
-        onTrash={handleTrash}
-        trashedCount={trashedCount}
-        isEndScreen={isEndScreen}
-        nextDisabled={nextDisabled}
-        inputDisabled={inputDisabled}
-        errorMessage={questionError}
-      />
+      {trashPreviewOpen ? (
+        <TrashedPreview
+          question={questionLoading ? null : currentQuestion}
+          pages={trashedPages}
+          loading={trashPreviewLoading}
+          error={trashPreviewError}
+          onClose={closeTrashPreview}
+          theme={theme}
+        />
+      ) : (
+        <Canvas
+          layout={layout}
+          timerText={timerText}
+          onNext={handleNext}
+            question={questionLoading ? null : currentQuestion}
+            answerText={inputValue}
+            onAnswerChange={handleAnswerChange}
+            onAnswerKeyDown={handleAnswerKeyDown}
+            onTrash={handleTrash}
+            onOpenTrashPreview={openTrashPreview}
+            trashedCount={trashedCount}
+          isEndScreen={isEndScreen}
+          nextDisabled={nextDisabled}
+          inputDisabled={inputDisabled}
+          errorMessage={questionError}
+        />
+      )}
     </div>
   )
 }
 
 export default App
+
+const TrashedPreview = ({
+  question,
+  pages,
+  loading,
+  error,
+  onClose,
+  theme,
+}: {
+  question: Question | null
+  pages: TrashedPage[]
+  loading: boolean
+  error: string | null
+  onClose: () => void
+  theme: { bg: string; accent: string }
+}) => {
+  return (
+    <div
+      className="trashed-preview"
+      style={
+        {
+          '--bg': theme.bg,
+          '--accent': theme.accent,
+        } as CSSProperties
+      }
+    >
+      <div className="trashed-preview__grid">
+        <h1 className="trashed-preview__headline">
+          {question?.prompt ?? 'What would you regret leaving unfinished?'}
+        </h1>
+        <button type="button" className="trashed-preview__back" onClick={onClose}>
+          Back
+        </button>
+        <div className="trashed-preview__cards">
+          {loading ? (
+            <div className="trashed-preview__empty">Loading trashed pages…</div>
+          ) : error ? (
+            <div className="trashed-preview__empty">{error}</div>
+          ) : (
+            pages.map((page) => (
+              <div key={page.id} className="trashed-preview__card">
+                <div className="trashed-preview__card-title">
+                  {page.body || 'No content recorded.'}
+                </div>
+                <div className="trashed-preview__card-meta">
+                  <span>You</span>
+                  <span>
+                    {page.created_at
+                      ? new Date(page.created_at).toLocaleString([], {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : 'time unknown'}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

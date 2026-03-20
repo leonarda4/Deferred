@@ -7,6 +7,14 @@ export type Question = {
   meta: Record<string, unknown> | null
 }
 
+export type TrashedPage = {
+  id: string
+  body: string
+  duration_ms: number
+  version_index: number
+  created_at: string | null
+}
+
 const STORAGE_KEYS = {
   userId: 'deferred_user_id',
   sessionId: 'deferred_session_id',
@@ -223,6 +231,7 @@ const insertAnswerVersion = async ({
   versionIndex,
   body,
   durationMs,
+  startedAtMs,
   kind,
 }: {
   sessionId: string
@@ -230,10 +239,13 @@ const insertAnswerVersion = async ({
   versionIndex: number
   body: string
   durationMs: number
+  startedAtMs: number
   kind: 'trash' | 'final'
 }) => {
   try {
     const client = ensureSupabase()
+    const startedAtIso = new Date(startedAtMs).toISOString()
+    const endedAtIso = new Date(startedAtMs + durationMs).toISOString()
     await client.from('answer_versions').insert({
       session_id: sessionId,
       question_id: questionId,
@@ -241,9 +253,87 @@ const insertAnswerVersion = async ({
       body,
       duration_ms: durationMs,
       kind,
+      version_type: kind,
+      started_at: startedAtIso,
+      ended_at: endedAtIso,
     })
   } catch (error) {
     console.error('Failed to insert answer version', error)
+  }
+}
+
+export const fetchTrashedCount = async (questionId: string) => {
+  try {
+    const client = ensureSupabase()
+    const { count, error } = await client
+      .from('answer_versions')
+      .select('id', { count: 'exact', head: true })
+      .eq('question_id', questionId)
+      .eq('kind', 'trash')
+    if (error) {
+      console.error('Failed to fetch trashed count', error)
+    }
+    if (count && count > 0) {
+      return count
+    }
+
+    const { count: legacyCount, error: legacyError } = await client
+      .from('trashed_answers')
+      .select('id', { count: 'exact', head: true })
+      .eq('question_id', questionId)
+    if (legacyError) {
+      console.error('Failed to fetch legacy trashed count', legacyError)
+      return count ?? 0
+    }
+    return legacyCount ?? count ?? 0
+  } catch (error) {
+    console.error('Failed to fetch trashed count', error)
+    return 0
+  }
+}
+
+export const fetchTrashedPages = async (questionId: string) => {
+  try {
+    const client = ensureSupabase()
+    const { data, error } = await client
+      .from('answer_versions')
+      .select('id, body, duration_ms, version_index, created_at')
+      .eq('question_id', questionId)
+      .eq('kind', 'trash')
+      .order('version_index', { ascending: false })
+    if (error) {
+      console.error('Failed to fetch trashed pages', error)
+    }
+
+    const mapped = (data ?? []).map((row) => ({
+      id: String(row.id),
+      body: String(row.body ?? ''),
+      duration_ms: Number(row.duration_ms ?? 0),
+      version_index: Number(row.version_index ?? 0),
+      created_at: row.created_at ? String(row.created_at) : null,
+    }))
+
+    if (mapped.length > 0) return mapped
+
+    const { data: legacy, error: legacyError } = await client
+      .from('trashed_answers')
+      .select('id, trashed_text, trashed_at')
+      .eq('question_id', questionId)
+      .order('trashed_at', { ascending: false })
+    if (legacyError) {
+      console.error('Failed to fetch legacy trashed pages', legacyError)
+      return mapped
+    }
+    return (legacy ?? []).map((row, index) => ({
+      id: String(row.id),
+      body: String(row.trashed_text ?? ''),
+      duration_ms: 0,
+      version_index: (legacy?.length ?? 0) - index,
+      created_at: row.trashed_at ? String(row.trashed_at) : null,
+    }))
+  } catch (error) {
+    console.error('Failed to fetch trashed pages', error)
+    return []
   }
 }
 
@@ -288,6 +378,7 @@ export const onTrash = async (questionId: string, body: string) => {
       versionIndex,
       body,
       durationMs,
+      startedAtMs: startedAt,
       kind: 'trash',
     })
     await addQuestionDuration(sessionId, questionId, durationMs)
@@ -311,6 +402,7 @@ export const onNext = async (questionId: string, body: string) => {
       versionIndex,
       body,
       durationMs,
+      startedAtMs: startedAt,
       kind: 'final',
     })
     await addQuestionDuration(sessionId, questionId, durationMs)
