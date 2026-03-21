@@ -15,6 +15,8 @@ import {
   fetchQuestionByOrder,
   fetchTrashedCount,
   fetchTrashedPages,
+  fetchActivityRecords,
+  fetchLeftCount,
   getStoredOrderIndex,
   onNext as trackNext,
   onQuestionRender,
@@ -24,6 +26,7 @@ import {
   setStoredOrderIndex,
   type Question,
   type TrashedPage,
+  type ActivityRecord,
 } from './lib/deferredTracking'
 import {
   COLS,
@@ -165,17 +168,6 @@ const themes = [
   { id: 'mint', bg: '#E2FDE6', accent: '#81FF94' },
 ]
 
-const activityRecords = [
-  { user: 'User0001', action: 'trashed a page', time: '20:43' },
-  { user: 'User0001', action: 'trashed a page', time: '20:44' },
-  { user: 'User0001', action: 'trashed a page', time: '20:45' },
-  { user: 'User0003', action: 'left', time: '20:46' },
-  { user: 'User0005', action: 'trashed a page', time: '20:47' },
-  { user: 'User0012', action: 'left', time: '20:48' },
-  { user: 'User0017', action: 'trashed a page', time: '20:49' },
-  { user: 'User0020', action: 'left', time: '20:50' },
-]
-
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 const compactWidthForBlock = (block: GridBlock) => {
@@ -287,7 +279,7 @@ const usePrefersReducedMotion = () => {
   return prefersReducedMotion
 }
 
-const LogPanel = ({ title, records }: { title: string; records: typeof activityRecords }) => {
+const LogPanel = ({ title, records }: { title: string; records: ActivityRecord[] }) => {
   const listRef = useRef<HTMLDivElement | null>(null)
 
   useLayoutEffect(() => {
@@ -407,6 +399,8 @@ const renderBlockContent = (
   inputPlaceholder: string,
   onTrash: () => void,
   onOpenTrashPreview: () => void,
+  activityRecords: ActivityRecord[],
+  leftCount: number,
   trashedCount: number | null,
   isEndScreen: boolean,
   nextDisabled: boolean,
@@ -422,8 +416,10 @@ const renderBlockContent = (
             : errorMessage ?? question?.prompt ?? 'Loading question...'}
         </h1>
       )
-    case 'users_left_panel':
-      return <LogPanel title={String(block.content ?? '15 users already left, are you next?')} records={activityRecords} />
+    case 'users_left_panel': {
+      const countText = `${leftCount} users already left, are you next?`
+      return <LogPanel title={countText} records={activityRecords} />
+    }
     case 'input_panel':
       return (
         <div className="block-panel">
@@ -605,6 +601,8 @@ const Canvas = ({
   inputPlaceholder,
   onTrash,
   onOpenTrashPreview,
+  activityRecords,
+  leftCount,
   trashedCount,
   isEndScreen,
   nextDisabled,
@@ -621,6 +619,8 @@ const Canvas = ({
   inputPlaceholder: string
   onTrash: () => void
   onOpenTrashPreview: () => void
+  activityRecords: ActivityRecord[]
+  leftCount: number
   trashedCount: number | null
   isEndScreen: boolean
   nextDisabled: boolean
@@ -729,6 +729,8 @@ const Canvas = ({
   inputPlaceholder,
   onTrash,
   onOpenTrashPreview,
+  activityRecords,
+  leftCount,
   trashedCount,
   isEndScreen,
   nextDisabled,
@@ -811,6 +813,8 @@ const Canvas = ({
               inputPlaceholder,
               onTrash,
               onOpenTrashPreview,
+              activityRecords,
+              leftCount,
               trashedCount,
               isEndScreen,
               nextDisabled,
@@ -876,6 +880,8 @@ function App() {
   const [trashPreviewError, setTrashPreviewError] = useState<string | null>(null)
   const [placeholderPool, setPlaceholderPool] = useState<string[]>([])
   const [inputPlaceholder, setInputPlaceholder] = useState('')
+  const [activityRecords, setActivityRecords] = useState<ActivityRecord[]>([])
+  const [leftCount, setLeftCount] = useState(0)
   const baseSeedRef = useRef(Math.floor(Math.random() * 1_000_000_000))
 
   const generatedLayouts = useMemo(() => {
@@ -979,6 +985,23 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!currentQuestion || isEndScreen) {
+      setActivityRecords([])
+      return
+    }
+    let active = true
+    const run = async () => {
+      const records = await fetchActivityRecords(currentQuestion.id)
+      if (!active) return
+      setActivityRecords(records)
+    }
+    void run()
+    return () => {
+      active = false
+    }
+  }, [currentQuestion, isEndScreen])
+
+  useEffect(() => {
     let active = true
     const run = async () => {
       const pool = await fetchPlaceholderPool()
@@ -1060,6 +1083,7 @@ function App() {
       setTrashedCount(null)
       setTrashedPages([])
       setTrashPreviewOpen(false)
+      setLeftCount(0)
       return
     }
     let active = true
@@ -1067,6 +1091,9 @@ function App() {
       const count = await fetchTrashedCount(currentQuestion.id)
       if (!active) return
       setTrashedCount(count)
+      const left = await fetchLeftCount(currentQuestion.order_index)
+      if (!active) return
+      setLeftCount(left)
     }
     void run()
     return () => {
@@ -1122,6 +1149,8 @@ function App() {
       const pages = await fetchTrashedPages(currentQuestion.id)
       setTrashedPages(pages)
     }
+    const records = await fetchActivityRecords(currentQuestion.id)
+    setActivityRecords(records)
   }
 
   const layout = activeLayouts[orderIndex % activeLayouts.length]
@@ -1199,11 +1228,13 @@ function App() {
             inputPlaceholder={inputPlaceholder}
             onTrash={handleTrash}
             onOpenTrashPreview={openTrashPreview}
+            activityRecords={activityRecords}
+            leftCount={leftCount}
             trashedCount={trashedCount}
-          isEndScreen={isEndScreen}
-          nextDisabled={nextDisabled}
-          inputDisabled={inputDisabled}
-          errorMessage={questionError}
+            isEndScreen={isEndScreen}
+            nextDisabled={nextDisabled}
+            inputDisabled={inputDisabled}
+            errorMessage={questionError}
         />
       )}
     </div>
@@ -1256,7 +1287,7 @@ const TrashedPreview = ({
                   {page.body || 'No content recorded.'}
                 </div>
                 <div className="trashed-preview__card-meta">
-                  <span>You</span>
+                  <span>{page.user_label || 'User0001'}</span>
                   <span>
                     {page.created_at
                       ? new Date(page.created_at).toLocaleString([], {

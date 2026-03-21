@@ -13,6 +13,155 @@ export type TrashedPage = {
   duration_ms: number
   version_index: number
   created_at: string | null
+  session_id: string
+  user_label: string
+}
+
+export type ActivityRecord = {
+  user: string
+  action: string
+  time: string
+}
+
+const sessionIndexCache = new Map<string, number>()
+let questionIndexCache: Map<string, number> | null = null
+
+const formatUserLabel = (index: number, isYou: boolean) => {
+  const label = `User${String(index).padStart(4, '0')}`
+  return isYou ? `${label} (you)` : label
+}
+
+const fetchSessionIndexMap = async (sessionIds: string[]) => {
+  const unique = [...new Set(sessionIds)].filter(Boolean)
+  const missing = unique.filter((id) => !sessionIndexCache.has(id))
+  if (missing.length === 0) {
+    return new Map(unique.map((id) => [id, sessionIndexCache.get(id)!]))
+  }
+  const client = ensureSupabase()
+  const { data, error } = await client
+    .from('sessions')
+    .select('id, started_at')
+    .in('id', missing)
+  if (error) {
+    console.error('Failed to fetch sessions for index', error)
+    return new Map(unique.map((id, index) => [id, index + 1]))
+  }
+  const sorted = (data ?? []).slice().sort((a, b) => {
+    const aTime = a.started_at ? new Date(a.started_at).getTime() : 0
+    const bTime = b.started_at ? new Date(b.started_at).getTime() : 0
+    if (aTime !== bTime) return aTime - bTime
+    return String(a.id).localeCompare(String(b.id))
+  })
+  sorted.forEach((row, index) => {
+    sessionIndexCache.set(String(row.id), index + 1)
+  })
+  unique.forEach((id, index) => {
+    if (!sessionIndexCache.has(id)) {
+      sessionIndexCache.set(id, sorted.length + index + 1)
+    }
+  })
+  return new Map(unique.map((id) => [id, sessionIndexCache.get(id)!]))
+}
+
+const fetchQuestionIndexMap = async () => {
+  if (questionIndexCache) return questionIndexCache
+  const client = ensureSupabase()
+  const { data, error } = await client.from('questions').select('id, order_index')
+  if (error) {
+    console.error('Failed to fetch questions index map', error)
+    return new Map()
+  }
+  questionIndexCache = new Map(
+    (data ?? []).map((row) => [String(row.id), Number(row.order_index ?? 0)]),
+  )
+  return questionIndexCache
+}
+
+export const fetchLeftCount = async (orderIndex: number) => {
+  try {
+    const client = ensureSupabase()
+    const { data: sessions, error } = await client
+      .from('sessions')
+      .select('id')
+      .not('ended_at', 'is', null)
+    if (error) {
+      console.error('Failed to fetch ended sessions', error)
+      return 0
+    }
+    const sessionIds = (sessions ?? []).map((row) => String(row.id))
+    if (sessionIds.length === 0) return 0
+
+    const { data: sq, error: sqError } = await client
+      .from('session_questions')
+      .select('session_id, question_id, advanced_at')
+      .in('session_id', sessionIds)
+      .not('advanced_at', 'is', null)
+    if (sqError) {
+      console.error('Failed to fetch session questions', sqError)
+      return sessionIds.length
+    }
+
+    const questionIndexMap = await fetchQuestionIndexMap()
+    const maxBySession = new Map<string, number>()
+    ;(sq ?? []).forEach((row) => {
+      const sessionId = String(row.session_id)
+      const questionId = String(row.question_id)
+      const index = questionIndexMap.get(questionId) ?? 0
+      const current = maxBySession.get(sessionId) ?? 0
+      if (index > current) maxBySession.set(sessionId, index)
+    })
+
+    let count = 0
+    sessionIds.forEach((id) => {
+      const max = maxBySession.get(id) ?? 0
+      if (max <= orderIndex) count += 1
+    })
+    return count
+  } catch (error) {
+    console.error('Failed to fetch left count', error)
+    return 0
+  }
+}
+
+export const fetchActivityRecords = async (
+  questionId: string,
+  limit = 8,
+): Promise<ActivityRecord[]> => {
+  try {
+    const client = ensureSupabase()
+    const currentSessionId = await getOrCreateSessionId()
+    const { data, error } = await client
+      .from('answer_versions')
+      .select('session_id, kind, created_at')
+      .eq('question_id', questionId)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    if (error) {
+      console.error('Failed to fetch activity records', error)
+      return []
+    }
+    const sessionIds = (data ?? []).map((row) => String(row.session_id ?? ''))
+    const indexMap = await fetchSessionIndexMap(sessionIds)
+    return (data ?? []).map((row) => {
+      const sessionId = String(row.session_id ?? '')
+      const index = indexMap.get(sessionId) ?? 1
+      const action = row.kind === 'trash' ? 'trashed a page' : 'submitted'
+      const time = row.created_at
+        ? new Date(String(row.created_at)).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        : '--:--'
+      return {
+        user: formatUserLabel(index, sessionId === currentSessionId),
+        action,
+        time,
+      }
+    })
+  } catch (error) {
+    console.error('Failed to fetch activity records', error)
+    return []
+  }
 }
 
 export const fetchPlaceholderPool = async () => {
@@ -312,9 +461,10 @@ export const fetchTrashedCount = async (questionId: string) => {
 export const fetchTrashedPages = async (questionId: string) => {
   try {
     const client = ensureSupabase()
+    const currentSessionId = await getOrCreateSessionId()
     const { data, error } = await client
       .from('answer_versions')
-      .select('id, body, duration_ms, version_index, created_at')
+      .select('id, body, duration_ms, version_index, created_at, session_id')
       .eq('question_id', questionId)
       .eq('kind', 'trash')
       .order('version_index', { ascending: false })
@@ -322,32 +472,48 @@ export const fetchTrashedPages = async (questionId: string) => {
       console.error('Failed to fetch trashed pages', error)
     }
 
-    const mapped = (data ?? []).map((row) => ({
-      id: String(row.id),
-      body: String(row.body ?? ''),
-      duration_ms: Number(row.duration_ms ?? 0),
-      version_index: Number(row.version_index ?? 0),
-      created_at: row.created_at ? String(row.created_at) : null,
-    }))
+    const sessionIds = (data ?? []).map((row) => String(row.session_id ?? ''))
+    const indexMap = await fetchSessionIndexMap(sessionIds)
+    const mapped = (data ?? []).map((row) => {
+      const sessionId = String(row.session_id ?? '')
+      const index = indexMap.get(sessionId) ?? 1
+      return {
+        id: String(row.id),
+        body: String(row.body ?? ''),
+        duration_ms: Number(row.duration_ms ?? 0),
+        version_index: Number(row.version_index ?? 0),
+        created_at: row.created_at ? String(row.created_at) : null,
+        session_id: sessionId,
+        user_label: formatUserLabel(index, sessionId === currentSessionId),
+      }
+    })
 
     if (mapped.length > 0) return mapped
 
     const { data: legacy, error: legacyError } = await client
       .from('trashed_answers')
-      .select('id, trashed_text, trashed_at')
+      .select('id, trashed_text, trashed_at, session_id')
       .eq('question_id', questionId)
       .order('trashed_at', { ascending: false })
     if (legacyError) {
       console.error('Failed to fetch legacy trashed pages', legacyError)
       return mapped
     }
-    return (legacy ?? []).map((row, index) => ({
-      id: String(row.id),
-      body: String(row.trashed_text ?? ''),
-      duration_ms: 0,
-      version_index: (legacy?.length ?? 0) - index,
-      created_at: row.trashed_at ? String(row.trashed_at) : null,
-    }))
+    const legacySessionIds = (legacy ?? []).map((row) => String(row.session_id ?? ''))
+    const legacyIndexMap = await fetchSessionIndexMap(legacySessionIds)
+    return (legacy ?? []).map((row, index) => {
+      const sessionId = String(row.session_id ?? '')
+      const idx = legacyIndexMap.get(sessionId) ?? 1
+      return {
+        id: String(row.id),
+        body: String(row.trashed_text ?? ''),
+        duration_ms: 0,
+        version_index: (legacy?.length ?? 0) - index,
+        created_at: row.trashed_at ? String(row.trashed_at) : null,
+        session_id: sessionId,
+        user_label: formatUserLabel(idx, sessionId === currentSessionId),
+      }
+    })
   } catch (error) {
     console.error('Failed to fetch trashed pages', error)
     return []
