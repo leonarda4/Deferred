@@ -186,6 +186,7 @@
   height: 100%;
   border: none;
   background: transparent;
+  color: #14110f;
   font-family: "Tanker", "Impact", sans-serif;
   font-size: 1.8rem;
   text-transform: uppercase;
@@ -321,12 +322,14 @@
   font-size: 1.4rem;
   padding-top: 12px;
   font-family: "Zodiak", "Georgia", "Times New Roman", serif;
+  color: #000000;
 }
 
 .stack-label {
   font-size: 0.8rem;
   line-height: 0.8;
   font-family: "Zodiak", "Georgia", "Times New Roman", serif;
+  color: #000000;
 }
 
 .stack-text {
@@ -377,11 +380,18 @@
   border: 1px solid #1c1b16;
   background: var(--accent);
   padding: 18px 20px;
+  color: #000000;
+  text-decoration: none;
   font-family: "Tanker", "Impact", sans-serif;
   text-transform: uppercase;
   font-size: 1.8rem;
   letter-spacing: -0.02em;
   cursor: pointer;
+}
+
+.trashed-preview a {
+  color: #000000;
+  text-decoration: none;
 }
 
 .trashed-preview__cards {
@@ -509,11 +519,14 @@
   .block-panel span,
   .panel-list,
   .log-list,
-  .locked-input,
   .input-credit,
   .stack-count,
   .stack-label {
     font-size: 0.9rem;
+  }
+
+  .locked-input {
+    font-size: 1rem;
   }
 
   .block--button_trash,
@@ -544,11 +557,14 @@
   .block-panel span,
   .panel-list,
   .log-list,
-  .locked-input,
   .input-credit,
   .stack-count,
   .stack-label {
     font-size: 0.85rem;
+  }
+
+  .locked-input {
+    font-size: 1rem;
   }
 
   .block--button_trash,
