@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -317,6 +318,7 @@ const useFlipAnimation = (
   skipFlipRef: MutableRefObject<boolean>,
 ) => {
   const prevRectsRef = useRef<Map<string, DOMRect>>(new Map())
+  const prevLayoutIdRef = useRef<string | null>(null)
 
   useLayoutEffect(() => {
     if (disabled) {
@@ -328,13 +330,15 @@ const useFlipAnimation = (
       return
     }
 
-    if (skipFlipRef.current) {
+    const layoutChanged = prevLayoutIdRef.current !== layoutId
+    if (skipFlipRef.current && !layoutChanged) {
       const resizedRects = new Map<string, DOMRect>()
       blockRefs.current.forEach((element, id) => {
         resizedRects.set(id, element.getBoundingClientRect())
       })
       prevRectsRef.current = resizedRects
       skipFlipRef.current = false
+      prevLayoutIdRef.current = layoutId
       return
     }
 
@@ -387,6 +391,7 @@ const useFlipAnimation = (
     })
 
     prevRectsRef.current = lastRects
+    prevLayoutIdRef.current = layoutId
   }, [blockRefs, disabled, layoutId, size.height, size.width, skipFlipRef])
 }
 
@@ -1159,8 +1164,19 @@ function App() {
     }, LONG_PAUSE_MS + 50)
   }
 
-  const handleAnswerKeyDown = (_event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+  const handleAnswerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (!currentQuestion) return
+    if (
+      !event.altKey &&
+      !event.shiftKey &&
+      !event.repeat &&
+      (event.key === 'Enter' || event.code === 'NumpadEnter') &&
+      (event.metaKey || event.ctrlKey)
+    ) {
+      event.preventDefault()
+      void handleSkip()
+      return
+    }
     void registerTypingTick(currentQuestion.id)
     const now = Date.now()
     lastTypedRef.current = now
@@ -1230,6 +1246,49 @@ function App() {
       return nextIndex
     })
   }
+
+  const handleSkip = useCallback(async () => {
+    if (isEndScreen) return
+    if (!currentQuestion) return
+    await trackNext(currentQuestion.id, '')
+    const nextIndex = orderIndex + 1
+    setStoredOrderIndex(nextIndex)
+    setOrderIndex(nextIndex)
+    setInputValue('')
+    setThemeIndex((current) => {
+      if (themes.length <= 1) return current
+      let nextIndex = current
+      while (nextIndex === current) {
+        nextIndex = Math.floor(Math.random() * themes.length)
+      }
+      return nextIndex
+    })
+  }, [currentQuestion, isEndScreen, orderIndex, trackNext])
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const isEnter =
+        event.key === 'Enter' ||
+        event.key === 'Return' ||
+        event.code === 'Enter' ||
+        event.code === 'NumpadEnter' ||
+        (typeof event.keyCode === 'number' && event.keyCode === 13)
+      if (
+        !event.altKey &&
+        !event.shiftKey &&
+        !event.repeat &&
+        (event.metaKey || event.ctrlKey) &&
+        isEnter
+      ) {
+        event.preventDefault()
+        void handleSkip()
+      }
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => {
+      window.removeEventListener('keydown', handler, true)
+    }
+  }, [handleSkip])
 
   const openTrashPreview = async () => {
     if (!currentQuestion || isEndScreen) return
