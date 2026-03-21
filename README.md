@@ -8,7 +8,6 @@ It is not meant to be finished.
 
 Deferred intentionally removes comfort features we take for granted—autosave, undo, skipping, safety nets—and replaces them with time, friction, and commitment. The goal is not better answers, but more honest thinking.
 
----
 
 ## Concept
 
@@ -29,7 +28,6 @@ It creates an environment where:
 
 The core metric is when and where users leave, not how much they complete.
 
----
 
 ## Experience Principles
 
@@ -48,7 +46,6 @@ The core metric is when and where users leave, not how much they complete.
 - **Discomfort escalates**  
   Questions progress from vague and light to personal and invasive, while topics rotate to avoid predictability.
 
----
 
 ## What Is Measured
 
@@ -67,7 +64,6 @@ Per question:
 
 The system assumes that leaving is success, not failure.
 
----
 
 ## Question System
 
@@ -79,7 +75,6 @@ The system assumes that leaving is success, not failure.
 
 The experience is intentionally designed to feel impossible to finish.
 
----
 
 ## Tech Stack (Current)
 
@@ -87,25 +82,8 @@ The experience is intentionally designed to feel impossible to finish.
 - **Backend:** Supabase
 - **Database:** PostgreSQL (RLS enabled)
 - **Auth:** Anonymous / session-based
-- **Storage:** Text + metadata only (no AI processing)
+- **Storage:** Text + metadata only
 
-The backend is minimal by design. Most logic lives client-side to preserve immediacy and reduce abstraction.
-
----
-
-## Repository Structure (High Level)
-
-```
-/app            → UI, routing, interaction logic
-/lib            → Supabase client, helpers
-/db             → SQL schemas, indexes, RLS policies
-/data           → Question definitions (canonical sets)
-/docs           → Concept notes and analysis
-```
-
-(Structure may evolve as the project stabilizes.)
-
----
 
 ## Why This Exists
 
@@ -123,30 +101,12 @@ It is meant as:
 - a critical interface
 - a case study for discomfort as a design material
 
----
-
-## Status
-
-This project is experimental and evolving.  
-Expect breaking changes, unfinished edges, and intentional roughness.
-
-Deferred is not meant to scale.  
-It is meant to confront.
-
----
-
-## License
-
-MIT (subject to change if the project evolves into a research artifact)
-
----
 
 ## Author
 
-Leonard A.  
+Leonarda Lovrić  
 Interaction / Critical Design Project
+MIT License 
 
----
 
-> “This website is meant to waste your time,  
-> but it might return a thought.”
+> This website is meant to waste your time, but it might return a thought.

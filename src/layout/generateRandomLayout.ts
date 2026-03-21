@@ -400,7 +400,6 @@ export const generateRandomLayout = (seed = Date.now()): ScreenLayout => {
   if (!blocks) {
     for (let attempt = 0; attempt < 12; attempt += 1) {
       const attemptSeed = seed + attempt * 7919
-      const rng = mulberry32(attemptSeed)
       const occupied = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => false))
       const sizePools = new Map(blockSpecs.map((spec) => [spec.id, buildSizePools(spec)]))
       const fallbackBlocks: GridBlock[] = []
