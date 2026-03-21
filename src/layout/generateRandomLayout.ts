@@ -33,27 +33,6 @@ type SizeOption = {
   area: number
 }
 
-const headlineTexts = [
-  'What decisions do you delay the longest?',
-  'What would you still do if no one could see the result?',
-  'What do you enjoy that you rarely talk about?',
-  'What do you blame on lack of time?',
-  'What part of yourself do others misunderstand?',
-  'When was the last time you lost track of time?',
-  'What do you envy in people close to you?',
-  'Who are you when nothing is being measured?',
-]
-
-const inputTexts = [
-  '"Career stuff."',
-  '"Sleep :)"',
-  '"Watching bad reality TV and overanalyzing it."',
-  '"Idk man"',
-  '"Yesterday at 3am scrolling for no reason."',
-  '"Calling my parents."',
-  '"Someone who starts things but doesn\'t finish."',
-  '"How easily they seem to belong."',
-]
 
 const blockSpecs: BlockSpec[] = [
   { id: 'headline', kind: 'headline', minW: 5, minH: 2, maxW: 9, maxH: 4, minArea: 12 },
@@ -376,18 +355,10 @@ const fillSingleCellGaps = (blocks: GridBlock[]) => {
   }
 }
 
-const buildContent = (rng: () => number) => ({
-  headline: headlineTexts[Math.floor(rng() * headlineTexts.length)],
-  input: inputTexts[Math.floor(rng() * inputTexts.length)],
-  users: `${randomInt(rng, 3, 18)} users already left, are you next?`,
-  stack: randomInt(rng, 4, 80),
-})
-
 const tryGenerate = (seed: number) => {
   const rng = mulberry32(seed)
   const occupied = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => false))
   const sizePools = new Map(blockSpecs.map((spec) => [spec.id, buildSizePools(spec)]))
-  const content = buildContent(rng)
 
   const blocks: GridBlock[] = []
   let success = true
@@ -410,10 +381,6 @@ const tryGenerate = (seed: number) => {
       h: placement.h,
     }
 
-    if (spec.id === 'headline') block.content = content.headline
-    if (spec.id === 'input') block.content = content.input
-    if (spec.id === 'users') block.content = content.users
-    if (spec.id === 'stack') block.content = content.stack
     blocks.push(block)
   }
 
@@ -436,8 +403,6 @@ export const generateRandomLayout = (seed = Date.now()): ScreenLayout => {
       const rng = mulberry32(attemptSeed)
       const occupied = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => false))
       const sizePools = new Map(blockSpecs.map((spec) => [spec.id, buildSizePools(spec)]))
-      const content = buildContent(rng)
-
       const fallbackBlocks: GridBlock[] = []
       let success = true
       for (const id of placementOrder) {
@@ -456,10 +421,6 @@ export const generateRandomLayout = (seed = Date.now()): ScreenLayout => {
           w: placement.w,
           h: placement.h,
         }
-        if (spec.id === 'headline') block.content = content.headline
-        if (spec.id === 'input') block.content = content.input
-        if (spec.id === 'users') block.content = content.users
-        if (spec.id === 'stack') block.content = content.stack
         fallbackBlocks.push(block)
       }
 
