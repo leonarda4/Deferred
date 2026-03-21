@@ -262,7 +262,7 @@
   align-items: center;
   justify-content: center;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   width: 100%;
   height: 100%;
 }
@@ -271,8 +271,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  height: 125%;
   width: auto;
+  position: relative;
 }
 
 .stack-icon {
@@ -284,6 +285,7 @@
   position: relative;
   background: #ffffff;
   aspect-ratio: 2 / 1;
+  top: 8px;
 }
 
 .stack-icon::before,
@@ -294,25 +296,39 @@
   height: 100%;
   border: 1px solid #1c1b16;
   background: #ffffff;
-  left: 10px;
-  top: -10px;
+  left: 8px;
+  top: -8px;
   z-index: -1;
 }
 
 .stack-icon::after {
-  left: 20px;
-  top: -20px;
+  left: 16px;
+  top: -16px;
   z-index: -2;
 }
 
 .stack-count {
-  font-size: 1rem;
+  font-size: 1.4rem;
+  padding-top: 12px;
   font-family: "Zodiak", "Georgia", "Times New Roman", serif;
 }
 
 .stack-label {
-  font-size: 1rem;
+  font-size: 0.8rem;
+  line-height: 0.8;
   font-family: "Zodiak", "Georgia", "Times New Roman", serif;
+}
+
+.stack-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12px 14px;
+  color: #14110f;
+  pointer-events: none;
 }
 
 .trashed-preview {

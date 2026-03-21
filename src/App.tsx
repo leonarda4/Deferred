@@ -471,10 +471,10 @@ const renderBlockContent = (
           <div className="block-stack">
             <div className="stack-frame" aria-hidden="true">
               <div className="stack-icon"></div>
-            </div>
-            <div>
-              <div className="stack-count">{count}</div>
-              <div className="stack-label">trashed pages</div>
+              <div className="stack-text">
+                <div className="stack-count">{count}</div>
+                <div className="stack-label">trashed pages</div>
+              </div>
             </div>
           </div>
         )
@@ -484,10 +484,10 @@ const renderBlockContent = (
           <div className="block-stack">
             <div className="stack-frame" aria-hidden="true">
               <div className="stack-icon"></div>
-            </div>
-            <div>
-              <div className="stack-count">{count}</div>
-              <div className="stack-label">trashed pages</div>
+              <div className="stack-text">
+                <div className="stack-count">{count}</div>
+                <div className="stack-label">trashed pages</div>
+              </div>
             </div>
           </div>
         </button>
