@@ -23,7 +23,8 @@ export type ActivityRecord = {
   time: string
 }
 
-const sessionIndexCache = new Map<string, number>()
+let sessionIndexCache = new Map<string, number>()
+let sessionIndexCacheReady = false
 let questionIndexCache: Map<string, number> | null = null
 
 const formatUserLabel = (index: number, isYou: boolean) => {
@@ -31,36 +32,34 @@ const formatUserLabel = (index: number, isYou: boolean) => {
   return isYou ? `${label} (you)` : label
 }
 
-const fetchSessionIndexMap = async (sessionIds: string[]) => {
-  const unique = [...new Set(sessionIds)].filter(Boolean)
-  const missing = unique.filter((id) => !sessionIndexCache.has(id))
-  if (missing.length === 0) {
-    return new Map(unique.map((id) => [id, sessionIndexCache.get(id)!]))
-  }
+const buildSessionIndexCache = async () => {
   const client = ensureSupabase()
   const { data, error } = await client
     .from('sessions')
     .select('id, started_at')
-    .in('id', missing)
+    .order('started_at', { ascending: true })
   if (error) {
     console.error('Failed to fetch sessions for index', error)
-    return new Map(unique.map((id, index) => [id, index + 1]))
+    sessionIndexCacheReady = true
+    return
   }
-  const sorted = (data ?? []).slice().sort((a, b) => {
-    const aTime = a.started_at ? new Date(a.started_at).getTime() : 0
-    const bTime = b.started_at ? new Date(b.started_at).getTime() : 0
-    if (aTime !== bTime) return aTime - bTime
-    return String(a.id).localeCompare(String(b.id))
-  })
-  sorted.forEach((row, index) => {
+  sessionIndexCache = new Map()
+  ;(data ?? []).forEach((row, index) => {
     sessionIndexCache.set(String(row.id), index + 1)
   })
-  unique.forEach((id, index) => {
-    if (!sessionIndexCache.has(id)) {
-      sessionIndexCache.set(id, sorted.length + index + 1)
-    }
-  })
-  return new Map(unique.map((id) => [id, sessionIndexCache.get(id)!]))
+  sessionIndexCacheReady = true
+}
+
+const fetchSessionIndexMap = async (sessionIds: string[]) => {
+  const unique = [...new Set(sessionIds)].filter(Boolean)
+  if (!sessionIndexCacheReady) {
+    await buildSessionIndexCache()
+  }
+  const missing = unique.filter((id) => !sessionIndexCache.has(id))
+  if (missing.length > 0) {
+    await buildSessionIndexCache()
+  }
+  return new Map(unique.map((id, index) => [id, sessionIndexCache.get(id) ?? index + 1]))
 }
 
 const fetchQuestionIndexMap = async () => {
@@ -190,9 +189,24 @@ const STORAGE_KEYS = {
   currentOrderIndex: 'deferred_current_order_index',
 }
 
+const SESSION_SCOPED_KEYS = new Set<string>([
+  STORAGE_KEYS.sessionId,
+  STORAGE_KEYS.questionStartedAt,
+  STORAGE_KEYS.versionIndex,
+  STORAGE_KEYS.lastTypedAt,
+  STORAGE_KEYS.currentOrderIndex,
+])
+
+const getStorageBackend = (key: string) => {
+  if (SESSION_SCOPED_KEYS.has(key)) {
+    return window.sessionStorage
+  }
+  return window.localStorage
+}
+
 const getStorage = (key: string) => {
   try {
-    return window.localStorage.getItem(key)
+    return getStorageBackend(key).getItem(key)
   } catch {
     return null
   }
@@ -200,7 +214,7 @@ const getStorage = (key: string) => {
 
 const setStorage = (key: string, value: string) => {
   try {
-    window.localStorage.setItem(key, value)
+    getStorageBackend(key).setItem(key, value)
   } catch {
     // ignore
   }
@@ -208,10 +222,18 @@ const setStorage = (key: string, value: string) => {
 
 const removeStorage = (key: string) => {
   try {
-    window.localStorage.removeItem(key)
+    getStorageBackend(key).removeItem(key)
   } catch {
     // ignore
   }
+}
+
+export const resetSessionForNewAttempt = () => {
+  removeStorage(STORAGE_KEYS.sessionId)
+  removeStorage(STORAGE_KEYS.questionStartedAt)
+  removeStorage(STORAGE_KEYS.versionIndex)
+  removeStorage(STORAGE_KEYS.lastTypedAt)
+  removeStorage(STORAGE_KEYS.currentOrderIndex)
 }
 
 const getStoredNumber = (key: string) => {

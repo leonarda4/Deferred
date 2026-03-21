@@ -22,6 +22,7 @@ import {
   onQuestionRender,
   onTrash as trackTrash,
   fetchPlaceholderPool,
+  resetSessionForNewAttempt,
   registerTypingTick,
   setStoredOrderIndex,
   type Question,
@@ -979,9 +980,10 @@ function App() {
     !isEndScreen && (questionLoading || Boolean(questionError) || inputValue.trim().length === 0)
 
   useEffect(() => {
-    if (!window.localStorage.getItem('deferred_current_order_index')) {
-      setStoredOrderIndex(1)
-    }
+    resetSessionForNewAttempt()
+    setStoredOrderIndex(1)
+    setOrderIndex(1)
+    setInputValue('')
   }, [])
 
   useEffect(() => {
@@ -1158,6 +1160,7 @@ function App() {
 
   const handleNext = async () => {
     if (isEndScreen) {
+      resetSessionForNewAttempt()
       setStoredOrderIndex(1)
       setOrderIndex(1)
       setInputValue('')
