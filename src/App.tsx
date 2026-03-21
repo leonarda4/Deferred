@@ -23,6 +23,8 @@ import {
   onTrash as trackTrash,
   fetchPlaceholderPool,
   resetSessionForNewAttempt,
+  recordLongPause,
+  LONG_PAUSE_MS,
   registerTypingTick,
   setStoredOrderIndex,
   type Question,
@@ -884,6 +886,9 @@ function App() {
   const [activityRecords, setActivityRecords] = useState<ActivityRecord[]>([])
   const [leftCount, setLeftCount] = useState(0)
   const baseSeedRef = useRef(Math.floor(Math.random() * 1_000_000_000))
+  const pauseTimeoutRef = useRef<number | null>(null)
+  const pauseLoggedRef = useRef(false)
+  const lastTypedRef = useRef<number | null>(null)
 
   const generatedLayouts = useMemo(() => {
     const layouts: ScreenLayout[] = []
@@ -1134,12 +1139,56 @@ function App() {
     if (!currentQuestion) return
     setInputValue(value)
     void registerTypingTick(currentQuestion.id)
+    const now = Date.now()
+    lastTypedRef.current = now
+    pauseLoggedRef.current = false
+    if (pauseTimeoutRef.current) {
+      window.clearTimeout(pauseTimeoutRef.current)
+    }
+    pauseTimeoutRef.current = window.setTimeout(async () => {
+      if (!currentQuestion) return
+      const last = lastTypedRef.current
+      if (!last || pauseLoggedRef.current) return
+      const gap = Date.now() - last
+      if (gap >= LONG_PAUSE_MS) {
+        pauseLoggedRef.current = true
+        await recordLongPause(currentQuestion.id, gap)
+        const records = await fetchActivityRecords(currentQuestion.id)
+        setActivityRecords(records)
+      }
+    }, LONG_PAUSE_MS + 50)
   }
 
   const handleAnswerKeyDown = (_event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (!currentQuestion) return
     void registerTypingTick(currentQuestion.id)
+    const now = Date.now()
+    lastTypedRef.current = now
+    pauseLoggedRef.current = false
+    if (pauseTimeoutRef.current) {
+      window.clearTimeout(pauseTimeoutRef.current)
+    }
+    pauseTimeoutRef.current = window.setTimeout(async () => {
+      if (!currentQuestion) return
+      const last = lastTypedRef.current
+      if (!last || pauseLoggedRef.current) return
+      const gap = Date.now() - last
+      if (gap >= LONG_PAUSE_MS) {
+        pauseLoggedRef.current = true
+        await recordLongPause(currentQuestion.id, gap)
+        const records = await fetchActivityRecords(currentQuestion.id)
+        setActivityRecords(records)
+      }
+    }, LONG_PAUSE_MS + 50)
   }
+
+  useEffect(() => {
+    return () => {
+      if (pauseTimeoutRef.current) {
+        window.clearTimeout(pauseTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const handleTrash = async () => {
     if (!currentQuestion) return

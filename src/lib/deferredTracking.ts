@@ -129,24 +129,67 @@ export const fetchActivityRecords = async (
   try {
     const client = ensureSupabase()
     const currentSessionId = await getOrCreateSessionId()
-    const { data, error } = await client
-      .from('answer_versions')
-      .select('session_id, kind, created_at')
-      .eq('question_id', questionId)
-      .order('created_at', { ascending: false })
-      .limit(limit)
-    if (error) {
-      console.error('Failed to fetch activity records', error)
-      return []
+    const [{ data: versions, error: versionsError }, { data: events, error: eventsError }] =
+      await Promise.all([
+        client
+          .from('answer_versions')
+          .select('session_id, kind, created_at')
+          .eq('question_id', questionId)
+          .order('created_at', { ascending: false })
+          .limit(limit),
+        client
+          .from('events')
+          .select('session_id, type, ts')
+          .eq('question_id', questionId)
+          .in('type', ['left', 'long_pause'])
+          .order('ts', { ascending: false })
+          .limit(limit),
+      ])
+
+    if (versionsError) {
+      console.error('Failed to fetch activity records (versions)', versionsError)
     }
-    const sessionIds = (data ?? []).map((row) => String(row.session_id ?? ''))
+    if (eventsError) {
+      console.error('Failed to fetch activity records (events)', eventsError)
+    }
+
+    const combined = [
+      ...(versions ?? []).map((row) => ({
+        session_id: String(row.session_id ?? ''),
+        kind: row.kind === 'trash' ? 'trash' : 'final',
+        ts: row.created_at ? String(row.created_at) : null,
+      })),
+      ...(events ?? []).map((row) => ({
+        session_id: String(row.session_id ?? ''),
+        kind: row.type === 'left' ? 'left' : 'long_pause',
+        ts: row.ts ? String(row.ts) : null,
+      })),
+    ]
+
+    const sessionIds = combined.map((row) => row.session_id)
     const indexMap = await fetchSessionIndexMap(sessionIds)
-    return (data ?? []).map((row) => {
-      const sessionId = String(row.session_id ?? '')
+    const sorted = combined
+      .slice()
+      .sort((a, b) => {
+        const aTime = a.ts ? new Date(a.ts).getTime() : 0
+        const bTime = b.ts ? new Date(b.ts).getTime() : 0
+        return bTime - aTime
+      })
+      .slice(0, limit)
+
+    return sorted.map((row) => {
+      const sessionId = row.session_id
       const index = indexMap.get(sessionId) ?? 1
-      const action = row.kind === 'trash' ? 'trashed a page' : 'submitted'
-      const time = row.created_at
-        ? new Date(String(row.created_at)).toLocaleTimeString([], {
+      const action =
+        row.kind === 'trash'
+          ? 'trashed a page'
+          : row.kind === 'final'
+            ? 'submitted'
+            : row.kind === 'left'
+              ? 'left'
+              : 'made a long pause'
+      const time = row.ts
+        ? new Date(row.ts).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
           })
@@ -187,6 +230,8 @@ const STORAGE_KEYS = {
   versionIndex: 'deferred_version_index',
   lastTypedAt: 'deferred_last_typed_at_ms',
   currentOrderIndex: 'deferred_current_order_index',
+  currentQuestionId: 'deferred_current_question_id',
+  longPauseLoggedAt: 'deferred_long_pause_logged_at_ms',
 }
 
 const SESSION_SCOPED_KEYS = new Set<string>([
@@ -234,6 +279,7 @@ export const resetSessionForNewAttempt = () => {
   removeStorage(STORAGE_KEYS.versionIndex)
   removeStorage(STORAGE_KEYS.lastTypedAt)
   removeStorage(STORAGE_KEYS.currentOrderIndex)
+  removeStorage(STORAGE_KEYS.longPauseLoggedAt)
 }
 
 const getStoredNumber = (key: string) => {
@@ -243,6 +289,8 @@ const getStoredNumber = (key: string) => {
   return Number.isFinite(value) ? value : null
 }
 
+export const LONG_PAUSE_MS = 5000
+
 const nowMs = () => Date.now()
 
 const ensureSupabase = () => {
@@ -250,6 +298,39 @@ const ensureSupabase = () => {
     throw new Error('Supabase client is not configured.')
   }
   return supabase
+}
+
+const insertEvent = async ({
+  sessionId,
+  questionId,
+  userId,
+  type,
+  data,
+}: {
+  sessionId: string
+  questionId: string | null
+  userId: string
+  type: string
+  data?: Record<string, unknown>
+}) => {
+  try {
+    const client = ensureSupabase()
+    const userIdNumber = Number(userId)
+    const resolvedUserId = Number.isFinite(userIdNumber) ? userIdNumber : null
+    if (resolvedUserId === null) {
+      console.error('Invalid user id for events insert', { userId })
+      return
+    }
+    await client.from('events').insert({
+      session_id: sessionId,
+      question_id: questionId,
+      user_id: resolvedUserId,
+      type,
+      data: data ?? {},
+    })
+  } catch (error) {
+    console.error('Failed to insert event', error)
+  }
 }
 
 export const getOrCreateUserId = async () => {
@@ -546,6 +627,7 @@ export const onQuestionRender = async (questionId: string) => {
   try {
     const sessionId = await getOrCreateSessionId()
     await ensureSessionQuestionRow(sessionId, questionId)
+    setStorage(STORAGE_KEYS.currentQuestionId, questionId)
     const startedAt = nowMs()
     setStorage(STORAGE_KEYS.questionStartedAt, String(startedAt))
     if (!getStoredNumber(STORAGE_KEYS.versionIndex)) {
@@ -559,16 +641,52 @@ export const onQuestionRender = async (questionId: string) => {
 
 export const registerTypingTick = async (questionId: string) => {
   const lastTyped = getStoredNumber(STORAGE_KEYS.lastTypedAt)
+  const lastPauseLoggedAt = getStoredNumber(STORAGE_KEYS.longPauseLoggedAt)
   const now = nowMs()
-  if (lastTyped && now - lastTyped > 5000) {
+  const shouldLogPause =
+    lastTyped &&
+    now - lastTyped > LONG_PAUSE_MS &&
+    (!lastPauseLoggedAt || lastPauseLoggedAt < lastTyped)
+  if (shouldLogPause) {
     try {
       const sessionId = await getOrCreateSessionId()
+      const userId = await getOrCreateUserId()
       await incrementLongPause(sessionId, questionId)
+      await insertEvent({
+        sessionId,
+        questionId,
+        userId,
+        type: 'long_pause',
+        data: { gap_ms: now - lastTyped },
+      })
+      setStorage(STORAGE_KEYS.longPauseLoggedAt, String(now))
     } catch (error) {
       console.error('Failed to register long pause', error)
     }
   }
   setStorage(STORAGE_KEYS.lastTypedAt, String(now))
+}
+
+export const recordLongPause = async (questionId: string, gapMs: number) => {
+  try {
+    const lastTyped = getStoredNumber(STORAGE_KEYS.lastTypedAt)
+    const lastPauseLoggedAt = getStoredNumber(STORAGE_KEYS.longPauseLoggedAt)
+    if (!lastTyped) return
+    if (lastPauseLoggedAt && lastPauseLoggedAt >= lastTyped) return
+    const sessionId = await getOrCreateSessionId()
+    const userId = await getOrCreateUserId()
+    await incrementLongPause(sessionId, questionId)
+    await insertEvent({
+      sessionId,
+      questionId,
+      userId,
+      type: 'long_pause',
+      data: { gap_ms: gapMs },
+    })
+    setStorage(STORAGE_KEYS.longPauseLoggedAt, String(nowMs()))
+  } catch (error) {
+    console.error('Failed to record long pause', error)
+  }
 }
 
 export const onTrash = async (questionId: string, body: string) => {
@@ -634,10 +752,18 @@ export const endSessionBestEffort = async () => {
     const client = ensureSupabase()
     const sessionId = getStorage(STORAGE_KEYS.sessionId)
     if (!sessionId) return
+    const userId = await getOrCreateUserId()
+    const questionId = getStorage(STORAGE_KEYS.currentQuestionId)
     await client
       .from('sessions')
       .update({ ended_at: new Date().toISOString() })
       .eq('id', sessionId)
+    await insertEvent({
+      sessionId,
+      questionId,
+      userId,
+      type: 'left',
+    })
   } catch (error) {
     console.error('Failed to end session', error)
   }

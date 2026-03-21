@@ -88,6 +88,10 @@
   justify-content: flex-start;
 }
 
+.block--users_left_panel {
+  overflow: hidden;
+}
+
 .block-panel h2,
 .log-panel h2 {
   font-size: 1.4rem;
@@ -128,6 +132,11 @@
   height: 100%;
   width: 100%;
   gap: 12px;
+  min-height: 0;
+}
+
+.log-panel h2 {
+  flex: 0 0 auto;
 }
 
 .log-list {
@@ -138,6 +147,7 @@
   overflow-y: auto;
   flex: 1;
   min-height: 0;
+  height: 100%;
   width: 100%;
   padding-right: 1.5rem;
   scrollbar-gutter: stable;
