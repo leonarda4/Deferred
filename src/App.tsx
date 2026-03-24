@@ -1383,7 +1383,11 @@ const TrashedPreview = ({
         <h1 className="trashed-preview__headline">
           {question?.prompt ?? 'What would you regret leaving unfinished?'}
         </h1>
-        <button type="button" className="trashed-preview__back" onClick={onClose}>
+        <button
+          type="button"
+          className="block-button trashed-preview__back"
+          onClick={onClose}
+        >
           Back
         </button>
         <div className="trashed-preview__cards">
